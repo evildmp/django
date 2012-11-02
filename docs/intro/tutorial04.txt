@@ -275,8 +275,8 @@ Run the server, and use your new polling app based on generic views.
 For full details on generic views, see the :doc:`generic views documentation
 </topics/class-based-views/index>`.
 
-What's next?
-============
-
-The tutorial ends here for the time being. In the meantime, you might want to
-check out some pointers on :doc:`where to go from here </intro/whatsnext>`.
+You now have a simple but complete and functional Django application. Before
+adding any further complexity, you need to make it safe for future
+development. Read :doc:`part 5 of this tutorial </intro/tutorial05>` to learn
+about using Django's testing framework to guarantee your code, making
+development quicker and easier.
