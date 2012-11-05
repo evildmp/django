@@ -126,6 +126,9 @@ So let's do that right away.
 Writing our first test
 ======================
 
+We identify a bug
+-----------------
+
 Fortunately, there is in fact a little bug in the ``polls`` application for us
 to fix right away: the ``Poll.was_published_recently()`` method returns True if
 the Poll was published in the last day (which is correct) but also if the
@@ -133,6 +136,28 @@ Poll's ``pub_date`` field is in the future (which certainly isn't).
 
 You can see this in the Admin; create a Poll whose date lies in the future;
 you'll see that the Poll change list claims it was published recently.
+
+Since things in the future are not 'recent', this is clearly wrong.
+
+You can also see this using the shell::
+
+    >>> # import the things we need
+    >>> from polls.models import Poll
+    >>> import datetime
+    >>> from django.utils import timezone
+    >>> # create a Poll instance with pub_date 30 days in the future
+    >>> future_poll = Poll(pub_date=timezone.now() + datetime.timedelta(days=30))
+    >>> # was it published recently?
+    >>> future_poll.was_published_recently()
+    True
+
+Create a test to expose the bug
+-------------------------------
+
+What we've just done in the shell to test it is exactly what we can do in an
+automated test, so let's turn that into an automated test.
+
+The best place for an application's tests is in the application's ``tests.py`` file - the testing system will look there for tests automatically.
 
 Edit the ``tests.py`` file in the ``polls`` application::
 
@@ -149,13 +174,19 @@ Edit the ``tests.py`` file in the ``polls`` application::
 	# we'll put all the Poll method tests in a class together
 	class PollMethodTests(TestCase):
 
+	    # was_published_recently() should report False for items in the future
 	    def test_future_poll(self):
 	        # create a Poll instance whose pub_date is in the future
 	        future_poll = Poll(pub_date=timezone.now() + datetime.timedelta(days=30))
 	        # was_published_recently() should return True
 	        self.assertEqual(future_poll.was_published_recently(), False)
 
-And in the terminal::
+What we have done here is created a ``TestCase`` subclass, with a method that creates an instance of ``Poll`` with a date in the future, and then checks the output of ``was_published_recently()`` - which *ought* to be False.
+
+Running tests
+-------------
+
+And in the terminal, we can run our test::
 
 	python manage.py test polls
 	
@@ -196,8 +227,11 @@ What happened is this:
 The test informs us which test failed - ``test_future_poll`` - and even the
 line on which the failure occurred.
 
+Fixing the bug
+--------------
+
 We already know what the problem is: ``Poll.was_published_recently()`` should
-return False if its ``pub_date`` is in the future. So amend it, in ``models.py``::
+return False if its ``pub_date`` is in the future. So amend it, in ``models.py``, only to return True if the date is also in the past::
 
     def was_published_recently(self):
         return self.pub_date >= timezone.now() - datetime.timedelta(days=1) and self.pub_date < timezone.now()
@@ -219,16 +253,23 @@ Many other things might go wrong with our application in the future, but we
 can now be sure that we won't inadvertantly reintroduce this bug, because
 simply running the test will warn us immediately. We can consider this little portion of the application pinned down safely forever.
 
-While we're here, we can further pin down the ``was_published_recently()`` method; in fact, it would be embarassing if in fixing one bug we had introduced another.
+More comprehensive tests
+------------------------
 
-Add two more test methods::
+While we're here, we can further pin down the ``was_published_recently()``
+method; in fact, it would be embarassing if in fixing one bug we had introduced
+another.
 
+Add two more test methods, to test the behaviour of the method more comprehensively::
+
+    # was_published_recently() should report False for older items
     def test_old_poll(self):
         # create a Poll instance whose pub_date is 30 days ago
         old_poll = Poll(pub_date=timezone.now() - datetime.timedelta(days=30))
         # was_published_recently() should return False
         self.assertEqual(old_poll.was_published_recently(), False)
     
+    # was_published_recently() should report True for older < 24 hours old
     def test_recent_poll(self):
         # create a Poll instance whose pub_date is one hour ago
         recent_poll = Poll(pub_date=timezone.now() - datetime.timedelta(hours=1))
@@ -246,14 +287,168 @@ ways.
 Test a view
 ===========
 
-* is_published field
+The polls application is fairly undiscriminating: it will publish any Poll,
+including:
 
+* ones whose ``pub_date`` field lies in the future
+* ones without any choices
+
+We should improve this. Setting a ``pub_date`` in the future should mean that the Poll is published at that moment, but invisible until then. And a Poll without at least two choices is clearly not ready to be published.
+
+We'll begin by tackling the date-related publishing improvement.
+
+A test for a view
+-----------------
+
+When we fixed the bug above we wrote the test first, and then the code to fix
+it. In fact that was a simple example of *test-driven development*, but it
+doesn't really matter in which order we do the work.
+
+In our first test, we focused closely on the internal behaviour of the code. For
+this test, we want to check its behaviour as it would be experienced by a user.
+
+Before we try to fix anything, let's have a look at the tools at our disposal.
+
+The Django test client
+----------------------
+
+Django provides a test ``Client`` to simulate and test a user's interacting with the code at the view level. Try this in the shell::
+
+    >>> # import the test Client class
+    >>> from django.test.client import Client
+    >>> # create an instance of it for our use
+    >>> c = Client()
+    >>> # get a response from '/'
+    >>> response = c.get('/')
+    >>> #  we should expect a 404 from that address
+    >>> response.status_code
+    404
+    >>> # but we should expect to find something at '/polls/'
+    >>> response = c.get('/polls/')
+    >>> response.status_code
+    200
+    >>> response.content
+    '\n\n\n    <p>No polls are available.</p>\n\n'
+    >>> # note - you might get unexpected results if your ``TIME_ZONE`` 
+    >>> # in ``settings.py`` is not correct. If you need to change it,
+    >>> # you will also need to restart your shell session
+    >>> from polls.models import Poll
+    >>> from django.utils import timezone
+    >>> # create a Poll and save it 
+    >>> p = Poll(question="Who is your favourite Beatle?", pub_date=timezone.now())
+    >>> p.save()
+    >>> # check the response once again
+    >>> response = c.get('/polls/')
+    >>> response.content
+    '\n\n\n    <ul>\n    \n        <li><a href="/polls/1/">Who is your favourite Beatle?</a></li>\n    \n    </ul>\n\n'
+    # note - I don't understand why response.context_data is required here instead of response.context:
+    >>> response.context_data['latest_poll_list']
+    [<Poll: Who is your favourite Beatle?>]
+
+Improving our view
+------------------
+
+In :doc:`Tutorial 4 </intro/tutorial04>` we deleted the view functions from
+``views.py``, to use a ListView doc:`generic
+view</topics/class-based-views/index>` in ``urls.py``::
+
+    url(r'^$',
+        ListView.as_view(
+            queryset=Poll.objects.order_by('-pub_date')[:5],
+            context_object_name='latest_poll_list',
+            template_name='polls/index.html'),
+        name='index'),
+
+``response.context_data['latest_poll_list']`` extracts the data this view placed
+into the context.
+
+What we need to amend is the line that gives our ``queryset``::
+
+    queryset=Poll.objects.order_by('-pub_date')[:5],
+        
+and what we need to do is change that so that it also checks the date, comparing it with ``timezone.now()``. So, first we need::
+
+    from django.utils import timezone
+
+and then we must amend the url function::
+
+    url(r'^$',
+        ListView.as_view(
+            queryset=Poll.objects.filterorder_by('-pub_date')[:5],
+            context_object_name='latest_poll_list',
+            template_name='polls/index.html'),
+        name='index'),
+
+to::
+
+    urlpatterns = patterns('',
+        url(r'^$',
+            ListView.as_view(
+                queryset=Poll.objects.filter(pub_date__lte=timezone.now()).order_by('-pub_date')[:5],
+                context_object_name='latest_poll_list',
+                template_name='polls/index.html'),
+            name='index'),
+
+``Poll.objects.filter(pub_date__lte=timezone.now())`` returns a queryset containing Polls whose pub_date is less than or equal to - that is, earlier than or equal to - ``timezone.now()``.
+
+Testing our new view
+--------------------
+
+Now you can satisfy yourself that this behaves as expected by firing up the
+runserver, loading the site in your browser, creating Polls with dates in the
+past and future, and checking that only the right ones are listed - but you
+don't want to have to do that *every single time you change that might affect
+this* - so let's also create a test, based on our shell session above.
+
+To ``tests.py`` add::
+
+    # we need the test client for views
+    from django.test.client import Client
+
+and we'll create a new class too::
+
+    # we'll put all the view tests in a class together
+    class PollViewTests(TestCase):
+        # setUp will set up our testing environment for each test
+        def setUp(self):
+            # Every test needs a client.
+            self.client = Client()
+    
+        def test_index_view(self):
+            # Issue a GET request.
+            response = self.client.get('/polls/')
+
+            # we should get a 200 OK
+            self.assertEqual(response.status_code, 200)          
+
+            # there should be nothing in the latest_poll_list
+            self.assertEqual(len(response.context_data['latest_poll_list']), 0)          
+
+            # create a Poll instance whose pub_date is 30 days ago
+            old_poll = Poll(
+                question="Who is your favourite Beatle?", 
+                pub_date=timezone.now() - datetime.timedelta(days=30)
+                )
+            old_poll.save()
+            response = self.client.get('/polls/')
+            # the only item in the list should be old_poll
+            self.assertEqual(response.context_data['latest_poll_list'][0], old_poll)          
+
+            # create a Poll instance whose pub_date is 30 in the future
+            future_poll = Poll(
+                question="Who is your favourite Rolling Stone?", 
+                pub_date=timezone.now() + datetime.timedelta(days=30)
+                )
+            future_poll.save()
+            response = self.client.get('/polls/')
+            # the only item in the list should *still* be old_poll
+            self.assertEqual(response.context_data['latest_poll_list'][0], old_poll)          
+    
+    
 Test the user experience
 ========================
 
 * selenium
-
-
 
 
 What's next?
