@@ -157,7 +157,8 @@ Create a test to expose the bug
 What we've just done in the shell to test it is exactly what we can do in an
 automated test, so let's turn that into an automated test.
 
-The best place for an application's tests is in the application's ``tests.py`` file - the testing system will look there for tests automatically.
+The best place for an application's tests is in the application's ``tests.py``
+file - the testing system will look there for tests automatically.
 
 Edit the ``tests.py`` file in the ``polls`` application::
 
@@ -181,7 +182,9 @@ Edit the ``tests.py`` file in the ``polls`` application::
 	        # was_published_recently() should return True
 	        self.assertEqual(future_poll.was_published_recently(), False)
 
-What we have done here is created a ``TestCase`` subclass, with a method that creates an instance of ``Poll`` with a date in the future, and then checks the output of ``was_published_recently()`` - which *ought* to be False.
+What we have done here is created a ``TestCase`` subclass, with a method that
+creates an instance of ``Poll`` with a date in the future, and then checks the
+output of ``was_published_recently()`` - which *ought* to be False.
 
 Running tests
 -------------
@@ -218,8 +221,8 @@ What happened is this:
 
 * it looked for test methods - ones whose names begin with ``test``
 
-* in ``test_future_poll`` it created a ``Poll`` instance whose ``pub_date`` field is
-  in the future
+* in ``test_future_poll`` it created a ``Poll`` instance whose ``pub_date``
+  field is in the future
 
 * ... and using the ``assertEqual()`` method, discovered that its
   ``was_published_recently()`` returns True, though we wanted it to return False          
@@ -231,7 +234,9 @@ Fixing the bug
 --------------
 
 We already know what the problem is: ``Poll.was_published_recently()`` should
-return False if its ``pub_date`` is in the future. So amend it, in ``models.py``, only to return True if the date is also in the past::
+return False if its ``pub_date`` is in the future. So amend it, in
+``models.py``, so that it will only return True if the date is also in the
+past::
 
     def was_published_recently(self):
         return self.pub_date >= timezone.now() - datetime.timedelta(days=1) and self.pub_date < timezone.now()
@@ -249,9 +254,10 @@ and running the test again::
 So now having identified a bug, we have written a test that exposes it, and
 corrected the bug in the code. 
 
-Many other things might go wrong with our application in the future, but we
-can now be sure that we won't inadvertantly reintroduce this bug, because
-simply running the test will warn us immediately. We can consider this little portion of the application pinned down safely forever.
+Many other things might go wrong with our application in the future, but we can
+now be sure that we won't inadvertantly reintroduce this bug, because simply
+running the test will warn us immediately. We can consider this little portion
+of the application pinned down safely forever.
 
 More comprehensive tests
 ------------------------
@@ -260,7 +266,8 @@ While we're here, we can further pin down the ``was_published_recently()``
 method; in fact, it would be embarassing if in fixing one bug we had introduced
 another.
 
-Add two more test methods, to test the behaviour of the method more comprehensively::
+Add two more test methods, to test the behaviour of the method more
+comprehensively::
 
     # was_published_recently() should report False for older items
     def test_old_poll(self):
@@ -293,7 +300,9 @@ including:
 * ones whose ``pub_date`` field lies in the future
 * ones without any choices
 
-We should improve this. Setting a ``pub_date`` in the future should mean that the Poll is published at that moment, but invisible until then. And a Poll without at least two choices is clearly not ready to be published.
+We should improve this. Setting a ``pub_date`` in the future should mean that
+the Poll is published at that moment, but invisible until then. And a Poll
+without at least two choices is clearly not ready to be published.
 
 We'll begin by tackling the date-related publishing improvement.
 
@@ -312,7 +321,8 @@ Before we try to fix anything, let's have a look at the tools at our disposal.
 The Django test client
 ----------------------
 
-Django provides a test ``Client`` to simulate and test a user's interacting with the code at the view level. Try this in the shell::
+Django provides a test ``Client`` to simulate and test a user's interacting with
+the code at the view level. Try this in the shell::
 
     >>> # import the test Client class
     >>> from django.test.client import Client
@@ -365,8 +375,9 @@ into the context.
 What we need to amend is the line that gives our ``queryset``::
 
     queryset=Poll.objects.order_by('-pub_date')[:5],
-        
-and what we need to do is change that so that it also checks the date, comparing it with ``timezone.now()``. So, first we need::
+    
+and what we need to do is change that so that it also checks the date,
+comparing it with ``timezone.now()``. So, first we need::
 
     from django.utils import timezone
 
@@ -389,7 +400,9 @@ to::
                 template_name='polls/index.html'),
             name='index'),
 
-``Poll.objects.filter(pub_date__lte=timezone.now())`` returns a queryset containing Polls whose pub_date is less than or equal to - that is, earlier than or equal to - ``timezone.now()``.
+``Poll.objects.filter(pub_date__lte=timezone.now())`` returns a queryset
+containing Polls whose pub_date is less than or equal to - that is, earlier than
+or equal to - ``timezone.now()``.
 
 Testing our new view
 --------------------
