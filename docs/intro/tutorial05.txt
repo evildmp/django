@@ -414,7 +414,7 @@ and we'll create a new class too::
             # Every test needs a client.
             self.client = Client()
     
-        def test_index_view(self):
+        def test_index_view_no_polls(self):
             # Issue a GET request.
             response = self.client.get('/polls/')
 
@@ -424,6 +424,7 @@ and we'll create a new class too::
             # there should be nothing in the latest_poll_list
             self.assertEqual(len(response.context_data['latest_poll_list']), 0)          
 
+        def test_index_view_with_polls(self):
             # create a Poll instance whose pub_date is 30 days ago
             old_poll = Poll(
                 question="Who is your favourite Beatle?", 
