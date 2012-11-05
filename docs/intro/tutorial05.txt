@@ -413,7 +413,7 @@ and we'll create a new class too::
         def setUp(self):
             # Every test needs a client.
             self.client = Client()
-    
+
         def test_index_view_no_polls(self):
             # Issue a GET request.
             response = self.client.get('/polls/')
@@ -426,27 +426,44 @@ and we'll create a new class too::
 
         def test_index_view_with_polls(self):
             # create a Poll instance whose pub_date is 30 days ago
-            old_poll = Poll(
+            beatles_poll = Poll(
                 question="Who is your favourite Beatle?", 
                 pub_date=timezone.now() - datetime.timedelta(days=30)
                 )
-            old_poll.save()
+            beatles_poll.save()
             response = self.client.get('/polls/')
-            # the only item in the list should be old_poll
-            self.assertEqual(response.context_data['latest_poll_list'][0], old_poll)          
+            # the only item in the list should be beatles_poll
+            self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
+            self.assertEqual(response.context_data['latest_poll_list'][0], beatles_poll)          
 
             # create a Poll instance whose pub_date is 30 in the future
-            future_poll = Poll(
+            stones_poll = Poll(
                 question="Who is your favourite Rolling Stone?", 
                 pub_date=timezone.now() + datetime.timedelta(days=30)
                 )
-            future_poll.save()
+            stones_poll.save()
             response = self.client.get('/polls/')
-            # the only item in the list should *still* be old_poll
-            self.assertEqual(response.context_data['latest_poll_list'][0], old_poll)          
-    
-    
-Test the user experience
+            # the only item in the list should *still* be beatles_poll
+            self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
+            self.assertEqual(response.context_data['latest_poll_list'][0], beatles_poll)          
+
+            # change the date on the stones_poll - put it in the past
+            stones_poll.pub_date = timezone.now() - datetime.timedelta(days=5)
+            stones_poll.save()
+            response = self.client.get('/polls/')
+            # we should 2 items now, stones_poll first and beatles_poll second
+            self.assertEqual(len(response.context_data['latest_poll_list']), 2)          
+            self.assertEqual(response.context_data['latest_poll_list'][0], stones_poll)          
+            self.assertEqual(response.context_data['latest_poll_list'][1], beatles_poll)          
+
+In effect, we are now using the tests to tell a story of admin input and user
+experience on the site, and checking that at every state and for every new
+change in the state of the system, the expected results are published.
+
+As the system becomes more complex, we can add more tests, but the basic
+principle is the same.
+
+Test the user experience 
 ========================
 
 * selenium
