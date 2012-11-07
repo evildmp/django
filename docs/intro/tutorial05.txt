@@ -48,18 +48,15 @@ But, if that's not the case, now is an excellent time to learn.
 Tests will save you time
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Speaking of time, that is exactly what automated tests will save you. Even
-a simple application like Polls needs to be tested. 
-
 Up to a certain point, 'checking that it seems to work' will be a satisfactory
 test. In a more sophisticated application you might have dozens of complex
 interactions between components. 
 
-Any change, in any of those components, could have unexpected consquences on
-the application's output. If checking that it still 'seems to work' means you
-have to run through its functionality with twenty different variations of your
-test data to see whether your most recent tweak to the code has broken
-anything is not a good use of your time.
+Any change, in any of those components, could have unexpected consquences on the
+application's output. Checking that it still 'seems to work' could mean running
+through your code's functionality with twenty different variations of your test
+data just to make sure you haven't broken something - not a good use of your
+time.
 
 That's especially true when automated tests could do it for you in seconds,
 and if something's going wrong, identify the exact place where it happens.
@@ -71,6 +68,7 @@ of writing tests, particularly when you know your code is working properly.
 However, even the unexciting task of writing tests is a lot more fulfilling
 than spending hours testing your application manually, and even longer trying
 to identify the cause of a newly-introduced problem.
+
 
 Tests don't just identify problems, they prevent them
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -86,13 +84,12 @@ Tests change that; they light up your code from the inside, and when something
 goes wrong inside they focus the light on the part that has gone wrong - *even
 if you hadn't even realised it had gone wrong*.
 
-Your code needs tests to be considered respectable
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Tests make your code more attractive
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Finally, tests make your code respectable. You might have created a brilliant
-piece of software, but you *will* find that many other developers simply
-refuse to look at it because it lacks tests; without tests, they won't trust
-it. 
+You might have created a brilliant piece of software, but you *will* find that
+many other developers simply refuse to look at it because it lacks tests;
+without tests, they won't trust it.
 
 So even if you're not persuaded by the arguments above, the fact that other
 developers want to see tests in your software before they take it seriously
@@ -142,9 +139,9 @@ Since things in the future are not 'recent', this is clearly wrong.
 You can also see this using the shell::
 
     >>> # import the things we need
-    >>> from polls.models import Poll
     >>> import datetime
     >>> from django.utils import timezone
+    >>> from polls.models import Poll
     >>> # create a Poll instance with pub_date 30 days in the future
     >>> future_poll = Poll(pub_date=timezone.now() + datetime.timedelta(days=30))
     >>> # was it published recently?
@@ -165,12 +162,12 @@ Edit the ``tests.py`` file in the ``polls`` application::
 	# import the Django TestCase class
 	from django.test import TestCase
 
-	# import the Poll model we want to test
-	from models import Poll
-
 	# we're testing the behaviour of a method that uses date-related functions
 	import datetime
 	from django.utils import timezone
+
+	# import the Poll model we want to test
+	from models import Poll
 
 	# we'll put all the Poll method tests in a class together
 	class PollMethodTests(TestCase):
@@ -179,7 +176,7 @@ Edit the ``tests.py`` file in the ``polls`` application::
 	    def test_future_poll(self):
 	        # create a Poll instance whose pub_date is in the future
 	        future_poll = Poll(pub_date=timezone.now() + datetime.timedelta(days=30))
-	        # was_published_recently() should return True
+	        # was_published_recently() should return False in this case
 	        self.assertEqual(future_poll.was_published_recently(), False)
 
 What we have done here is created a ``TestCase`` subclass, with a method that
@@ -263,8 +260,8 @@ More comprehensive tests
 ------------------------
 
 While we're here, we can further pin down the ``was_published_recently()``
-method; in fact, it would be embarassing if in fixing one bug we had introduced
-another.
+method; in fact, it would be positively embarassing if in fixing one bug we had
+introduced another.
 
 Add two more test methods, to test the behaviour of the method more
 comprehensively::
@@ -322,12 +319,25 @@ The Django test client
 ----------------------
 
 Django provides a test ``Client`` to simulate and test a user's interacting with
-the code at the view level. Try this in the shell::
+the code at the view level, and we can use it in ``tests.py`` or the shell. 
 
-    >>> # import the test Client class
+We will start again with the shell, where we need to do a couple of things that
+won't be necessary in ``tests.py``. The first is to set up the test environment
+in the shell::
+
+	>>> from django.test.utils import setup_test_environment
+	>>> setup_test_environment() 
+	
+Next we need to import the test Client class (later in ``tests.py`` the Django
+TestCase class we will use later comes with its own client and this won't be
+necessary)::
+
     >>> from django.test.client import Client
-    >>> # create an instance of it for our use
+    >>> # create an instance of the client for our use
     >>> c = Client()
+
+With that ready, we can ask the client to do some work for us::
+
     >>> # get a response from '/'
     >>> response = c.get('/')
     >>> #  we should expect a 404 from that address
@@ -353,8 +363,7 @@ the code at the view level. Try this in the shell::
     >>> response = c.get('/polls/')
     >>> response.content
     '\n\n\n    <ul>\n    \n        <li><a href="/polls/1/">Who is your favourite Beatle?</a></li>\n    \n    </ul>\n\n'
-    # note - I don't understand why response.context_data is required here instead of response.context:
-    >>> response.context_data['latest_poll_list']
+    >>> response.context['latest_poll_list']
     [<Poll: Who is your favourite Beatle?>]
 
 Improving our view
@@ -417,62 +426,75 @@ this* - so let's also create a test, based on our shell session above.
 
 To ``tests.py`` add::
 
-    # we need the test client for views
-    from django.test.client import Client
-    
     # to work out URLs from the view we need urlresolvers.reverse
     from django.core.urlresolvers import reverse
 
 and we'll create a new class too::
 
     # we'll put all the view tests in a class together
-    class PollViewTests(TestCase):
-        # setUp will set up our testing environment for each test
-        def setUp(self):
-            # Every test needs a client.
-            self.client = Client()
+	class PollViewTests(TestCase):
+	    # setUp will set up our testing environment for each and every test 
+	    # method in the class
+	    def setUp(self):
+	        # We'll set up some objects that we'll over and over again in our 
+	        # tests, so that we don't have to repeat ourselves. Note that we 
+	        # don't savethem until we need them in the database - we do that in 
+	        # the test methods themselves.
+        
+	        # a Poll instance whose pub_date is 30 days ago
+	        self.beatles_poll = Poll(
+	            question="Who is your favourite Beatle?", 
+	            pub_date=timezone.now() - datetime.timedelta(days=30)
+	            )
 
-        def test_index_view_no_polls(self):
-            # Issue a GET request.
-            response = self.client.get(reverse('polls:index'))
+	        # a Poll instance whose pub_date is 30 in the future
+	        self.stones_poll = Poll(
+	            question="Who is your favourite Rolling Stone?", 
+	            pub_date=timezone.now() + datetime.timedelta(days=30)
+	            )
 
-            # we should get a 200 OK
-            self.assertEqual(response.status_code, 200)          
+	    def test_index_view_no_polls(self):
+	        # Issue a GET request.
+	        response = self.client.get(reverse('polls:index'))
 
-            # there should be nothing in the latest_poll_list
-            self.assertEqual(len(response.context_data['latest_poll_list']), 0)          
+	        # we should get a 200 OK
+	        self.assertEqual(response.status_code, 200)          
 
-        def test_index_view_with_polls(self):
-            # create a Poll instance whose pub_date is 30 days ago
-            beatles_poll = Poll(
-                question="Who is your favourite Beatle?", 
-                pub_date=timezone.now() - datetime.timedelta(days=30)
-                )
-            beatles_poll.save()
-            response = self.client.get(reverse('polls:index'))
-            # the only item in the list should be beatles_poll
-            self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
-            self.assertEqual(response.context_data['latest_poll_list'][0], beatles_poll)          
+	        # there should be nothing in the latest_poll_list
+	        self.assertEqual(len(response.context['latest_poll_list']), 0)          
 
-            # create a Poll instance whose pub_date is 30 in the future
-            stones_poll = Poll(
-                question="Who is your favourite Rolling Stone?", 
-                pub_date=timezone.now() + datetime.timedelta(days=30)
-                )
-            stones_poll.save()
-            response = self.client.get(reverse('polls:index'))
-            # the only item in the list should *still* be beatles_poll
-            self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
-            self.assertEqual(response.context_data['latest_poll_list'][0], beatles_poll)          
+	    def test_index_view_with_a_past_poll(self):
+	        self.beatles_poll.save()
+	        response = self.client.get(reverse('polls:index'))
+	        # the only item in the list should be beatles_poll
+	        self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
+	        self.assertEqual(response.context_data['latest_poll_list'][0], self.beatles_poll)          
 
-            # change the date on the stones_poll - put it in the past
-            stones_poll.pub_date = timezone.now() - datetime.timedelta(days=5)
-            stones_poll.save()
-            response = self.client.get(reverse('polls:index'))
-            # we should 2 items now, stones_poll first and beatles_poll second
-            self.assertEqual(len(response.context_data['latest_poll_list']), 2)          
-            self.assertEqual(response.context_data['latest_poll_list'][0], stones_poll)          
-            self.assertEqual(response.context_data['latest_poll_list'][1], beatles_poll)          
+	    def test_index_view_with_a_future_poll(self):
+	        self.stones_poll.save()
+	        response = self.client.get(reverse('polls:index'))
+	        # the only item in the list should *still* be beatles_poll
+	        self.assertEqual(len(response.context_data['latest_poll_list']), 0)          
+
+	    def test_index_view_with_future_poll_and_past_poll(self):
+	        self.beatles_poll.save()
+	        self.stones_poll.save()
+	        response = self.client.get(reverse('polls:index'))
+	        # the only item in the list should *still* be beatles_poll
+	        self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
+	        self.assertEqual(response.context_data['latest_poll_list'][0], self.beatles_poll)          
+
+	    def test_index_view_with_two_past_polls(self):
+	        self.beatles_poll.save()
+	        # change the date on the stones_poll - put it in the past
+	        self.stones_poll.pub_date = timezone.now() - datetime.timedelta(days=5)
+	        self.stones_poll.save()
+	        response = self.client.get(reverse('polls:index'))
+	        # we should 2 items now, stones_poll first and beatles_poll second
+	        self.assertEqual(len(response.context_data['latest_poll_list']), 2)          
+	        self.assertEqual(response.context_data['latest_poll_list'][0], self.stones_poll)          
+	        self.assertEqual(response.context_data['latest_poll_list'][1], self.beatles_poll)          
+
 
 In effect, we are now using the tests to tell a story of admin input and user
 experience on the site, and checking that at every state and for every new
