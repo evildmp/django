@@ -69,7 +69,6 @@ However, even the unexciting task of writing tests is a lot more fulfilling
 than spending hours testing your application manually, and even longer trying
 to identify the cause of a newly-introduced problem.
 
-
 Tests don't just identify problems, they prevent them
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -431,7 +430,7 @@ To ``tests.py`` add::
 
 and we'll create a new class too::
 
-    # we'll put all the view tests in a class together
+	# we'll put all the view tests in a class together
 	class PollViewTests(TestCase):
 	    # setUp will set up our testing environment for each and every test 
 	    # method in the class
@@ -440,7 +439,7 @@ and we'll create a new class too::
 	        # tests, so that we don't have to repeat ourselves. Note that we 
 	        # don't savethem until we need them in the database - we do that in 
 	        # the test methods themselves.
-        
+       
 	        # a Poll instance whose pub_date is 30 days ago
 	        self.beatles_poll = Poll(
 	            question="Who is your favourite Beatle?", 
