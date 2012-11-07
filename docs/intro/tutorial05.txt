@@ -334,7 +334,9 @@ the code at the view level. Try this in the shell::
     >>> response.status_code
     404
     >>> # but we should expect to find something at '/polls/'
-    >>> response = c.get('/polls/')
+    >>> # we'll this is with 'reverse()' rather than a harcoded URL
+    >>> from django.core.urlresolvers import reverse
+    >>> response = c.get(reverse('polls:index'))
     >>> response.status_code
     200
     >>> response.content
@@ -417,6 +419,9 @@ To ``tests.py`` add::
 
     # we need the test client for views
     from django.test.client import Client
+    
+    # to work out URLs from the view we need urlresolvers.reverse
+    from django.core.urlresolvers import reverse
 
 and we'll create a new class too::
 
@@ -429,7 +434,7 @@ and we'll create a new class too::
 
         def test_index_view_no_polls(self):
             # Issue a GET request.
-            response = self.client.get('/polls/')
+            response = self.client.get(reverse('polls:index'))
 
             # we should get a 200 OK
             self.assertEqual(response.status_code, 200)          
@@ -444,7 +449,7 @@ and we'll create a new class too::
                 pub_date=timezone.now() - datetime.timedelta(days=30)
                 )
             beatles_poll.save()
-            response = self.client.get('/polls/')
+            response = self.client.get(reverse('polls:index'))
             # the only item in the list should be beatles_poll
             self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
             self.assertEqual(response.context_data['latest_poll_list'][0], beatles_poll)          
@@ -455,7 +460,7 @@ and we'll create a new class too::
                 pub_date=timezone.now() + datetime.timedelta(days=30)
                 )
             stones_poll.save()
-            response = self.client.get('/polls/')
+            response = self.client.get(reverse('polls:index'))
             # the only item in the list should *still* be beatles_poll
             self.assertEqual(len(response.context_data['latest_poll_list']), 1)          
             self.assertEqual(response.context_data['latest_poll_list'][0], beatles_poll)          
@@ -463,7 +468,7 @@ and we'll create a new class too::
             # change the date on the stones_poll - put it in the past
             stones_poll.pub_date = timezone.now() - datetime.timedelta(days=5)
             stones_poll.save()
-            response = self.client.get('/polls/')
+            response = self.client.get(reverse('polls:index'))
             # we should 2 items now, stones_poll first and beatles_poll second
             self.assertEqual(len(response.context_data['latest_poll_list']), 2)          
             self.assertEqual(response.context_data['latest_poll_list'][0], stones_poll)          
