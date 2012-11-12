@@ -492,7 +492,8 @@ and we'll create a new class too::
 
 Let's look at some of these more closely. 
 
-All the test methods run ``setUp()``, which creates the two ``Poll`` instances. It doesn't save them though; we only run ``save()`` on them when we need them.
+All the test methods run ``setUp()``, which creates the two ``Poll`` instances. 
+It doesn't save them though; we only run ``save()`` on them when we need them.
 
 ``test_index_view_with_no_polls`` hasn't saved either of the ``Polls``, so we
 expect the poll index view load a page, but to return the message: "No polls are
@@ -504,7 +505,7 @@ so we *do* expect to find it in the list.
 In ``test_index_view_with_a_future_poll``, we save the other poll. The database
 is reset for each test method, so the first poll is no longer there, and so once
 more the index shouldn't have any polls in it. Note that there is more than one
-``aasert`` method at our disposal; here we are using a new one,
+``assert`` method at our disposal; here we are using a new one,
 ``assertContains()``.
 
 And so on. In effect, we are now using the tests to tell a story of admin input
@@ -529,7 +530,8 @@ to them - for example::
             template_name='polls/detail.html'),
         name='detail'),
 
-and of course, we will add some tests, to check that a ``Poll`` whose ``pub_date`` is in the past can be displayed, and that one with a ``pub_date`` in the future is not::
+and of course, we will add some tests, to check that a ``Poll`` whose ``pub_date`` 
+is in the past can be displayed, and that one with a ``pub_date`` in the future is not:
 
     # we will need this in test_detail_view_with_a_future_poll() below
     from django.test.utils import override_settings
@@ -544,7 +546,7 @@ and of course, we will add some tests, to check that a ``Poll`` whose ``pub_date
 
         # tests set DEBUG=False, whatever our settings.py says, so we need to
         # override this for this method, otherwise the 404 we expect our request 
-        # to should raise will cause an exception
+        # to raise will cause an exception
         @override_settings(DEBUG=True)
         def test_detail_view_with_a_future_poll(self):
             self.stones_poll.save()
