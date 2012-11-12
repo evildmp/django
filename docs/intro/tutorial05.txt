@@ -579,7 +579,9 @@ Perhaps logged-in admin users should be allowed to see unpublished ``Polls``, bu
 not ordinary visitors. Again: whatever needs to be added to the software to
 accomplish this should be accompanied by a test, whether you write the test
 first and then make the code pass the test, or work out the logic in your code
-first and then write a test to prove it.
+first and then write a test to prove it.  Often though, writing your 
+tests first, will help clarify what the code you are testing should be doing.
+This can make for better, smaller code.
 
 At a certain point you are bound to look at your tests and wonder whether your
 code is suffering from test bloat, which brings us to:
