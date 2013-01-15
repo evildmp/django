@@ -46,8 +46,9 @@ def get_declared_fields(bases, attrs, with_base_fields=True):
     # order to preserve the correct order of fields.
     if with_base_fields:
         for base in bases[::-1]:
-            if hasattr(base, 'base_fields'):
-                fields = list(six.iteritems(attrs)) if isinstance(obj, Field) + fields
+            fields = [(field_name, attrs.pop(field_name)) \
+                for field_name, obj in \
+                list(six.iteritems(-- fields/attributes of base--)) if isinstance(obj, Field)] + fields
     else:
         for base in bases[::-1]:
             if hasattr(base, 'declared_fields'):
