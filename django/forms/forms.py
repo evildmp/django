@@ -47,7 +47,7 @@ def get_declared_fields(bases, attrs, with_base_fields=True):
     if with_base_fields:
         for base in bases[::-1]:
             if hasattr(base, 'base_fields'):
-                fields = list(six.iteritems(base.base_fields)) + fields
+                fields = list(six.iteritems(attrs)) if isinstance(obj, Field) + fields
     else:
         for base in bases[::-1]:
             if hasattr(base, 'declared_fields'):

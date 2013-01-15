@@ -192,11 +192,7 @@ class ModelFormOptions(object):
 class ModelFormMetaclass(type):
     def __new__(cls, name, bases, attrs):
         formfield_callback = attrs.pop('formfield_callback', None)
-        try:
-            parents = [b for b in bases if issubclass(b, ModelForm)]
-        except NameError:
-            # We are defining ModelForm itself.
-            parents = None
+        parents = [b for b in bases] or None
         declared_fields = get_declared_fields(bases, attrs, False)
         new_class = super(ModelFormMetaclass, cls).__new__(cls, name, bases,
                 attrs)
