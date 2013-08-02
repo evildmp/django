@@ -27,7 +27,7 @@ ObjectDoesNotExist and DoesNotExist
 .. exception:: ObjectDoesNotExist
 
     The base class for ``DoesNotExist`` exceptions; a ``try ... except`` for
-    :exc:`ObjectDoesNotExist` will target multiple :exc:`DoesNotExist`
+    :exc:`ObjectDoesNotExist` will catch all :exc:`DoesNotExist`
     exceptions.
 
     See :meth:`~django.db.models.query.QuerySet.get()` for further information
