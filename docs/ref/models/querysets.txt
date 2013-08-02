@@ -812,10 +812,10 @@ larger result set that would result from joining across a 'many' relationship,
 one-to-one.
 
 ``prefetch_related``, on the other hand, does a separate lookup for each
-relationship, and does the 'joining' in Python. This allows it to prefetch
+relationship, and does the 'joining' in Python. This allows it to pre-fetch
 many-to-many and many-to-one objects, which cannot be done using
 ``select_related``, in addition to the foreign key and one-to-one relationships
-that are supported by ``select_related``. It also supports prefetching of
+that are supported by ``select_related``. It also supports pre-fetching of
 :class:`~django.contrib.contenttypes.generic.GenericRelation` and
 :class:`~django.contrib.contenttypes.generic.GenericForeignKey`.
 
@@ -835,7 +835,7 @@ For example, suppose you have these models::
             return u"%s (%s)" % (self.name, u", ".join([topping.name
                                                         for topping in self.toppings.all()]))
 
-and run this code::
+and run::
 
     >>> Pizza.objects.all()
     [u"Hawaiian (ham, pineapple)", u"Seafood (prawns, smoked salmon)"...
@@ -845,13 +845,14 @@ The problem with this is that every time ``Pizza.__unicode__()`` asks for
 ``Pizza.objects.all()`` will run a query on the Toppings table for **every**
 item in the Pizza ``QuerySet``.
 
-Using ``prefetch_related``, this can be reduced to two queries:
+We can reduce to just two queries using ``prefetch_related``:
 
     >>> Pizza.objects.all().prefetch_related('toppings')
 
-Now each time ``self.toppings.all()`` is called, instead of having to go to the
-database for the items, it will find them in a pre-fetched ``QuerySet`` cache
-that was populated in a single query.
+This implies a ``self.toppings.all()`` for each ``Pizza``; now each time
+``self.toppings.all()`` is called, instead of having to go to the database for
+the items, it will find them in a pre-fetched ``QuerySet`` cache that was
+populated in a single query.
 
 That is, all the relevant toppings will have been fetched in a single query,
 and used to make ``QuerySets`` that have a pre-filled cache of the relevant
@@ -868,18 +869,20 @@ database.
 
 .. note::
 
-    Remember that, as always with ``QuerySets``, any subsequent chained
-    methods which imply a different database query will ignore previously
-    cached results, and retrieve data using a fresh database query. So, if you
-    write the following:
+    Remember that, as always with ``QuerySets``, any subsequent chained methods
+    which imply a different database query will ignore previously-cached
+    results, and retrieve data using a fresh database query. So, if you write
+    the following:
 
- >>> pizzas = Pizza.objects.prefetch_related('toppings') 
- >>>
-    [list(pizza.toppings.filter(spicy=True)) for pizza in pizzas]
+        >>> pizzas = Pizza.objects.prefetch_related('toppings') 
+        >>> [list(pizza.toppings.filter(spicy=True)) for pizza in pizzas]
 
-    ...then the fact that ``pizza.toppings.all()`` has been prefetched will
-    not help you - in fact it hurts performance, since you have done a database
-    query that you haven't used. So use this feature with caution!
+    ...then the fact that ``pizza.toppings.all()`` has been pre-fetched will not
+    help you. The ``prefetch_related('toppings')`` implied
+    ``pizza.toppings.all()``, but ``pizza.toppings.filter()`` is a new and
+    different query. The pre-fetched cache can't help here; in fact it hurts
+    performance, since you have done a database query that you haven't used. So
+    use this feature with caution!
 
 You can also use the normal join syntax to do related fields of related
 fields. Suppose we have an additional model to the example above::
@@ -892,7 +895,7 @@ The following are all legal:
 
     >>> Restaurant.objects.prefetch_related('pizzas__toppings')
 
-This will prefetch all pizzas belonging to restaurants, and all toppings
+This will pre-fetch all pizzas belonging to restaurants, and all toppings
 belonging to those pizzas. This will result in a total of 3 database queries -
 one for the restaurants, one for the pizzas, and one for the toppings.
 
@@ -912,7 +915,7 @@ needed by ``select_related``), it is able to detect that the ``best_pizza``
 objects have already been fetched, and it will skip fetching them again.
 
 Chaining ``prefetch_related`` calls will accumulate the lookups that are
-prefetched. To clear any ``prefetch_related`` behavior, pass `None` as a
+pre-fetched. To clear any ``prefetch_related`` behavior, pass `None` as a
 parameter::
 
    >>> non_prefetched = qs.prefetch_related(None)
@@ -924,7 +927,7 @@ tree of objects that are returned. This will normally happen with foreign key
 relationships. Typically this behavior will not be a problem, and will in fact
 save both memory and CPU time.
 
-While ``prefetch_related`` supports prefetching ``GenericForeignKey``
+While ``prefetch_related`` supports pre-fetching ``GenericForeignKey``
 relationships, the number of queries will depend on the data. Since a
 ``GenericForeignKey`` can reference data in multiple tables, one query per table
 referenced is needed, rather than one query for all the items. There could be
