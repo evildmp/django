@@ -351,11 +351,13 @@ achieve this is to do something like::
 If the old ``number_sold`` value retrieved from the database was 10, then
 the value of 11 will be written back to the database.
 
-The process can be made robust and slightly faster by expressing the update
-relative to the original field value, rather than as an explicit assignment of
-a new value. Django provides :class:`F expressions <django.db.models.F>` for
-performing this kind of relative update. Using :class:`F expressions
-<django.db.models.F>`, the previous example is expressed as::
+The process can be made robust, :ref:`avoiding a race condition
+<avoiding-race-conditions-using-f>`, as well as slightly faster by expressing
+the update relative to the original field value, rather than as an explicit
+assignment of a new value. Django provides :class:`F expressions
+<django.db.models.F>` for performing this kind of relative update. Using
+:class:`F expressions <django.db.models.F>`, the previous example is expressed
+as::
 
     >>> from django.db.models import F
     >>> product = Product.objects.get(name='Venezuelan Beaver Cheese')
