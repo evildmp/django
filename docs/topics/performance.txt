@@ -1,0 +1,347 @@
+===========================
+Perfomance and optimization
+===========================
+
+This document provides an overview of approaches, techniques, tools and helpers
+that can help get your Django code running more efficiently - faster, and using
+fewer system resources.
+
+Introduction
+============
+
+Generally one's first concern is to write code that *works*, whose logic
+functions as required to produce the expected output. Sometimes it will turn
+out to be the case though that this is not enough to make the code work as
+*efficiently* as one would like.
+
+In this case, what's needed is something - and in practice, often a collection
+of things - to improve the code's performance without, or only minimally,
+affecting its behaviour.
+
+General approaches
+==================
+
+What are you optimizing *for*?
+------------------------------
+
+It's important to have a clear idea what you mean by improved performance -
+there is not just one marker of performance.
+
+Improved speed might be the most obvious aim for a program, but sometimes the
+performance improvements sought might be in another direction, such as lower
+memory consumption, or fewer demands on the database or network.
+
+Improvements in one area will often bring about improved performance in other,
+not always; sometimes one can even be at the expense of another. For example,
+an improvement in a program's speed might cause it to use more memory. Even
+worse, it can be self defeating - if the speed improvement is so memory-hungry
+that the system starts to run out of memory, you'll have done more harm than
+good.
+
+There are other trade-offs to bear in mind. Your own time is a valuable
+resource, more precious than CPU time. Some improvements might be too difficult
+to be worth attaining, or might affect the portability or maintainability of
+the code. They are not all worth it.
+
+So, you need to know what performance improvements you are aiming for, and you
+also need to know that you have a good reason for aiming in that direction -
+and for that you need:
+
+Perfomance benchmarking
+-----------------------
+
+It's no good just guessing or assuming where the inefficiencies lie in your
+code.
+
+`django-debug-toolbar
+<https://github.com/django-debug-toolbar/django-debug-toolbar/>`_ is a very
+handy tool that provides insights into what your code is doing and how much
+time it spends doing it.
+
+Third-party plugins are also available for the toolbar; particularly useful for
+studying the performance of your code are the `Cache Panel
+<https://github.com/lincolnloop/django-cache-panel>`_ and `Template Timings
+<https://github.com/orf/django-debug-toolbar-template-timings>`_ modules.
+
+# other tools
+
+# should we mention front-end performance analysis tools too?
+#   * pingdom
+#   * Yahoo's Yslow
+#   * Google PageSpeed
+
+Get things right from the start
+-------------------------------
+
+Some work in optimization involves tackling performance shortcomings, but some
+of the work can simply be built in to what you'd do anyway, as part of the good
+practices you should adopt even before you start thinking about improving
+performance.
+
+In this respect Python is an excellent language to work with, because solutions
+that look elegant and feel right usually are the best performing ones. As with
+most skills, learning what 'looks right' takes practice, but some useful
+guidelines are:
+
+Work at the appropriate level
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Django offers many possible different ways of approaching things, but don't do
+things just because you can. For example, you might find that you could
+calculate the same thing - the number of items in a collection, perhaps - in a
+``QuerySet``, in Python or in a template.
+
+However, almost always it will be faster to do this work closer to the bottom
+of the system, where these things are dealt with in their rawest states rather
+than through multiple levels of abstraction::
+
+    # QuerySet operation on the database
+    # fast, because that's what databases are good at
+    my_bicycles.count()
+
+    # counting Python objects
+    # slower, because it requires a database query anyway, and processing
+    # of the Python objects
+    len(my_bicycles)
+
+    # Django template filter
+    # slower still, because it will have to count them in Python anyway,
+    # and because of template language overheads
+    {{ my_bicycles|length }}
+
+Generally speaking, the most appropriate level for the job is the lowest-level one that it is comfortable to code for.
+
+.. note::
+
+    The example above is merely illustrative.
+
+    Firstly, in a real-life case you need to consider what is happening before
+    and after your count to work out what's an optimal way of doing it *in that
+    particular context*. The database optimization documents describes :ref:`a
+    case where counting in the template would be better
+    <overuse_of_count_and_exists>`.
+
+    Secondly, there are other options to consider: in a real-life case, ``{{
+    my_bicycles.count }}``, which invokes the ``QuerySet`` ``count()`` method
+    directly from the template, might be the appropriate choice.
+
+Caching
+=======
+
+Often it is expensive - resource-hungry and slow - to compute a value, so there
+can be huge benefit in saving the value to a quickly accessible cache ready for
+the next time it's required.
+
+It's a sufficiently significant and powerful technique that Django includes a
+comprehensive caching framework, as well as numerous other opportunities to
+make use of caching.
+
+:doc:`The caching framework </topics/cache>`
+--------------------------------------------
+
+Django's :doc:`caching framework </topics/cache>` offers very significant
+opportunities for performance gains, by saving dynamic content so that it
+doesn't need to be calculated for each request.
+
+For convenience, Django offers different levels of cache granularity: you can
+cache the output of specific views, you can cache only the pieces that are
+difficult to produce, or even an entire site.
+
+Other opportunities for caching
+-------------------------------
+
+Beyond the caching framework, Django offers other smaller pieces of caching
+functionality.
+
+:class:`django.utils.functional.cached_property`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+It's common to have to call a class instances's method more than once. If
+that function is expensive, then doing so is wasteful.
+
+Using the ``@cached_property`` decorator saves the value returned by a
+property; the next time the function is called on that instance, it will return
+the saved value rather than re-computing it.
+
+:class:`django.contrib.staticfiles.storage.CachedStaticFilesStorage`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+CachedStaticFilesStorage appends a content-dependent tag to the filenames of
+:doc:`static files </ref/contrib/staticfiles>` to make it safe for browsers to
+cache them long-term without missing future changes - when a file changes, so
+will the tag, so browsers will reload the asset automatically.
+
+# other examples?
+
+Understanding laziness
+----------------------
+
+*Laziness* is the strategy complementary to caching. Caching avoids
+recomputation by saving results; laziness saves effort trying to avoid work in
+the first place. That is, laziness means not doing anything until it has to be
+done, because it may not turn out to be necessary after all, and if something
+does have to be done, it will do its best to do it only once.
+
+Python makes very good use of this principle. In fact Python is quite a lazy
+language, and one of the best ways to make use of laziness in Python is a
+negative one: don't do things that prevent Python being lazy. Similarly, Django
+likes to be lazy.
+
+A typical Django example can be found in the evaluation of ``QuerySets``.
+
+# other examples in Django?
+
+Databases
+=========
+
+:doc:`Database optimization </topics/db/optimization>`
+------------------------------------------------------
+
+Django’s database layer provides various ways to help developers get the most
+out of their databases. The database optimization document gathers together
+links to the relevant documentation, and adds various tips, organized under a
+number of headings that outline the steps to take when attempting to optimize
+your database usage.
+
+Other database-related tips
+---------------------------
+
+:ref:`Persistent database connections <persistent-database-connections>`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enabling persistent database connections can result in a nice speed-up when
+connecting to the database accounts for a significant part of the request
+processing time.
+
+This helps a lot on virtualized hosts with limited network performance.
+
+# other examples?
+
+Built-in middleware
+===================
+
+Django comes with a few other pieces of middleware that can help optimize your
+site's performance:
+
+:class:`django.middleware.http.ConditionalGetMiddleware`
+--------------------------------------------------------
+
+Adds support for modern browsers to conditionally GET responses based on the
+``ETag`` and ``Last-Modified`` headers.
+
+:class:`django.middleware.gzip.GZipMiddleware`
+----------------------------------------------
+
+Compresses responses for all modern browsers, saving bandwidth and transfer
+time. # https://code.djangoproject.com/ticket/20887
+
+Template performance
+====================
+
+:class:`django.template.loaders.cached.Loader`
+----------------------------------------------
+
+Enabling the cached template loader often improves performance drastically, as
+it avoids compiling each template every time it needs to be rendered.
+
+Third-party tools for improving performance
+===========================================
+
+# for example, HTML/JS/CSS minifying packages
+
+HTTP accelerators # is this even appropriate here?
+--------------------------------------------------
+
+* Varnish?
+
+Using faster versions of available software
+===========================================
+
+Your code will rely on components that may have faster alternatives available.
+
+Open source software developers are a restless, tinkering crowd, and there is
+nothing they tend to like better than the opportunity to build a better
+mousetrap.
+
+The result is that often you'll find that you can simply swap out one component
+for another.
+
+Newer is usually better
+-----------------------
+
+This is certainly true of Django itself - successive release notes show a
+number of improvements across the system to be enjoyed just by using a newer
+version.
+
+Newer versions of Python, and also of Python packages, will often be faster too.
+
+It's quite rare for a new release of well-maintained software to be less
+efficient, but the maintainers can't anticipate every possible use-case - so
+while being aware of this rule, don't simply assume it will always hold.
+
+Alternatives to Django components
+---------------------------------
+
+Most developers find Django's template system perfectly adequate. However, if
+the bottlenecks in your Django project seem to lie in the template system, a
+third-party alternative may be the answer.
+
+`Jinja2 <http://jinja.pocoo.org/docs/>`_ or `Cheetah
+<http://www.cheetahtemplate.org/>`_ may offer performance improvements,
+particularly when it comes to speed.
+
+Alternative template systems vary in the extent to which they share Django's
+templating language.
+
+.. note::
+
+    *If* you experience performance issues in templates, the first thing to do
+    is to understand exactly why. Using an alternative template system may
+    prove faster, but the same gains may also be available without going to
+    that trouble - for example, expensive processing and logic in your
+    templates could be done more efficiently in your views.
+
+Alternative versions of third-party libraries
+---------------------------------------------
+
+When you are using a Python library, it's always worth checking whether a
+version has been provided in another, faster implementation.
+
+Just for example `ElementTree <http://effbot.org/zone/element-index.htm>`_ - a
+library for handling data trees, such as HTML or XML documents - is also
+implemented in C as `cElementTree <http://effbot.org/zone/celementtree.htm>`_;
+it provides exactly the same API, but it can be many times faster.
+
+If you want your software to be more portable, don't just rely on the having
+the faster version of such a package installed. By using ``import`` in
+``try...except``, you can use the favoured one if its available, or fall back
+to a more common package if not. So in this case::
+
+    try:
+        import cElementTree as ElementTree
+    except ImportError:
+        from elementtree import ElementTree
+
+# other notable examples that deserve mention?
+
+`PyPy <http://pypy.org/>`_
+--------------------------
+
+PyPy is an implementation of Python written in Python itself (the 'standard'
+Python implementation is CPython, written in C). PyPy can sometimes be
+significantly faster than CPython.
+
+PyPy's most significant limitation is its compatibility with Python packages.
+Django itself *is* compatible, but you may find that other packages you use are
+not.
+
+Increasing compatibility with the widest possible range of software is a major
+aim of the the PyPy project. A list of compatible software is maintained on the
+`Python compatibility <http://pypy.org/compat.html>`_ page.
+
+Tips and tricks
+===============
+
+This section lists a colleciton of disparate things that can affect performance.
+
+:doc:`Over-large session cookies </topics/db/optimization>` can have a detrimental effect on your site's performance. See http://yuiblog.com/blog/2007/03/01/performance-research-part-3/ for more on this.

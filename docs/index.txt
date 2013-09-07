@@ -232,6 +232,16 @@ regions:
 * :doc:`"Local flavor" <topics/localflavor>`
 * :doc:`Time zones </topics/i18n/timezones>`
 
+Performance and optimization
+============================
+
+There are a variety of approaches, techniques, tools and helpers that can help
+get your code running more efficiently - faster, and using fewer system
+resources.
+
+* :doc:`Performance and optimization overview <topics/performance>`
+
+
 Python compatibility
 ====================
 
