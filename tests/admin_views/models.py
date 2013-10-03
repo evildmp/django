@@ -704,3 +704,23 @@ class FilteredManager(models.Model):
 
     pk_gt_1 = _Manager()
     objects = models.Manager()
+
+
+class ParentWithDependentChildren(models.Model):
+    """
+    Issue #20522
+    Model where the validation of child foreign-key relationships depends
+    on validation of the parent
+    """
+    some_required_info = models.PositiveIntegerField()
+    family_name = models.CharField(max_length=255, blank=False)
+
+
+class DependentChild(models.Model):
+    """
+    Issue #20522
+    Model that depends on validation of the parent class for one of its
+    fields to validate during clean
+    """
+    parent = models.ForeignKey(ParentWithDependentChildren)
+    family_name = models.CharField(max_length=255)
