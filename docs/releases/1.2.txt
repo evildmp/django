@@ -352,7 +352,7 @@ are now included:
 
 GeoDjango now supports the rich capabilities added
 in the `PostGIS 1.5 release <http://postgis.refractions.net/documentation/manual-1.5/>`_.
-New features include suppport for the :ref:`geography type <geography-type>`
+New features include support for the :ref:`geography type <geography-type>`
 and enabling of :ref:`distance queries <distance-queries>`
 with non-point geometries on geographic coordinate systems.
 
@@ -721,8 +721,9 @@ value and interpretation of the ``max_num`` parameter to the
 :ref:`django.forms.formsets.formset_factory() <formsets-max-num>` and
 :ref:`django.forms.models.modelformset_factory()
 <model-formsets-max-num>` functions has changed slightly. This
-change also affects the way the ``max_num`` argument is :ref:`used for
-inline admin objects <ref-contrib-admin-inline-max-num>`
+change also affects the way the
+:attr:`~django.contrib.admin.InlineModelAdmin.max_num` argument is used for
+inline admin objects.
 
 Previously, the default value for ``max_num`` was ``0`` (zero).
 FormSets then used the boolean value of ``max_num`` to determine if a

@@ -56,7 +56,7 @@ class DatabaseCreation(BaseDatabaseCreation):
     def __init__(self, connection):
         super(DatabaseCreation, self).__init__(connection)
 
-    def _create_test_db(self, verbosity=1, autoclobber=False):
+    def _create_test_db(self, verbosity=1, autoclobber=False, keepdb=False):
         TEST_NAME = self._test_database_name()
         TEST_USER = self._test_database_user()
         TEST_PASSWD = self._test_database_passwd()
@@ -76,6 +76,10 @@ class DatabaseCreation(BaseDatabaseCreation):
             try:
                 self._execute_test_db_creation(cursor, parameters, verbosity)
             except Exception as e:
+                # if we want to keep the db, then no need to do any of the below,
+                # just return and skip it all.
+                if keepdb:
+                    return
                 sys.stderr.write("Got an error creating the test database: %s\n" % e)
                 if not autoclobber:
                     confirm = input("It appears the test database, %s, already exists. Type 'yes' to delete it, or 'no' to cancel: " % TEST_NAME)
@@ -116,10 +120,14 @@ class DatabaseCreation(BaseDatabaseCreation):
                     print("Tests cancelled.")
                     sys.exit(1)
 
+        self.connection.close()  # done with main user -- test user and tablespaces created
+
         real_settings = settings.DATABASES[self.connection.alias]
         real_settings['SAVED_USER'] = self.connection.settings_dict['SAVED_USER'] = self.connection.settings_dict['USER']
         real_settings['SAVED_PASSWORD'] = self.connection.settings_dict['SAVED_PASSWORD'] = self.connection.settings_dict['PASSWORD']
-        real_settings['TEST_USER'] = real_settings['USER'] = self.connection.settings_dict['TEST_USER'] = self.connection.settings_dict['USER'] = TEST_USER
+        real_test_settings = real_settings['TEST']
+        test_settings = self.connection.settings_dict['TEST']
+        real_test_settings['USER'] = real_settings['USER'] = test_settings['USER'] = self.connection.settings_dict['USER'] = TEST_USER
         real_settings['PASSWORD'] = self.connection.settings_dict['PASSWORD'] = TEST_PASSWD
 
         return self.connection.settings_dict['NAME']
@@ -216,56 +224,40 @@ class DatabaseCreation(BaseDatabaseCreation):
                 sys.stderr.write("Failed (%s)\n" % (err))
                 raise
 
+    def _test_settings_get(self, key, default=None, prefixed=None):
+        """
+        Return a value from the test settings dict,
+        or a given default,
+        or a prefixed entry from the main settings dict
+        """
+        settings_dict = self.connection.settings_dict
+        val = settings_dict['TEST'].get(key, default)
+        if val is None:
+            val = TEST_DATABASE_PREFIX + settings_dict[prefixed]
+        return val
+
     def _test_database_name(self):
-        name = TEST_DATABASE_PREFIX + self.connection.settings_dict['NAME']
-        try:
-            if self.connection.settings_dict['TEST_NAME']:
-                name = self.connection.settings_dict['TEST_NAME']
-        except AttributeError:
-            pass
-        return name
+        return self._test_settings_get('NAME', prefixed='NAME')
 
     def _test_database_create(self):
-        return self.connection.settings_dict.get('TEST_CREATE', True)
+        return self._test_settings_get('CREATE_DB', default=True)
 
     def _test_user_create(self):
-        return self.connection.settings_dict.get('TEST_USER_CREATE', True)
+        return self._test_settings_get('CREATE_USER', default=True)
 
     def _test_database_user(self):
-        name = TEST_DATABASE_PREFIX + self.connection.settings_dict['USER']
-        try:
-            if self.connection.settings_dict['TEST_USER']:
-                name = self.connection.settings_dict['TEST_USER']
-        except KeyError:
-            pass
-        return name
+        return self._test_settings_get('USER', prefixed='USER')
 
     def _test_database_passwd(self):
-        name = PASSWORD
-        try:
-            if self.connection.settings_dict['TEST_PASSWD']:
-                name = self.connection.settings_dict['TEST_PASSWD']
-        except KeyError:
-            pass
-        return name
+        return self._test_settings_get('PASSWORD', default=PASSWORD)
 
     def _test_database_tblspace(self):
-        name = TEST_DATABASE_PREFIX + self.connection.settings_dict['NAME']
-        try:
-            if self.connection.settings_dict['TEST_TBLSPACE']:
-                name = self.connection.settings_dict['TEST_TBLSPACE']
-        except KeyError:
-            pass
-        return name
+        return self._test_settings_get('TBLSPACE', prefixed='NAME')
 
     def _test_database_tblspace_tmp(self):
-        name = TEST_DATABASE_PREFIX + self.connection.settings_dict['NAME'] + '_temp'
-        try:
-            if self.connection.settings_dict['TEST_TBLSPACE_TMP']:
-                name = self.connection.settings_dict['TEST_TBLSPACE_TMP']
-        except KeyError:
-            pass
-        return name
+        settings_dict = self.connection.settings_dict
+        return settings_dict['TEST'].get('TBLSPACE_TMP',
+                                         TEST_DATABASE_PREFIX + settings_dict['NAME'] + '_temp')
 
     def _get_test_db_name(self):
         """

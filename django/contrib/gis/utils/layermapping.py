@@ -97,16 +97,16 @@ class LayerMapping(object):
         self.mapping = mapping
         self.model = model
 
-        # Checking the layer -- intitialization of the object will fail if
+        # Checking the layer -- initialization of the object will fail if
         # things don't check out before hand.
         self.check_layer()
 
         # Getting the geometry column associated with the model (an
         # exception will be raised if there is no geometry column).
-        if self.spatial_backend.mysql:
-            transform = False
-        else:
+        if connections[self.using].features.supports_transform:
             self.geo_field = self.geometry_field()
+        else:
+            transform = False
 
         # Checking the source spatial reference system, and getting
         # the coordinate transformation object (unless the `transform`
@@ -239,7 +239,7 @@ class LayerMapping(object):
                     raise TypeError('ForeignKey mapping must be of dictionary type.')
             else:
                 # Is the model field type supported by LayerMapping?
-                if not model_field.__class__ in self.FIELD_TYPES:
+                if model_field.__class__ not in self.FIELD_TYPES:
                     raise LayerMapError('Django field type "%s" has no OGR mapping (yet).' % fld_name)
 
                 # Is the OGR field in the Layer?
@@ -277,7 +277,7 @@ class LayerMapping(object):
         if isinstance(unique, (list, tuple)):
             # List of fields to determine uniqueness with
             for attr in unique:
-                if not attr in self.mapping:
+                if attr not in self.mapping:
                     raise ValueError
         elif isinstance(unique, six.string_types):
             # Only a single field passed in.
@@ -489,7 +489,7 @@ class LayerMapping(object):
 
          progress:
            When this keyword is set, status information will be printed giving
-           the number of features processed and sucessfully saved.  By default,
+           the number of features processed and successfully saved.  By default,
            progress information will pe printed every 1000 features processed,
            however, this default may be overridden by setting this keyword with an
            integer for the desired interval.

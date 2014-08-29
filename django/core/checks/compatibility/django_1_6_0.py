@@ -3,10 +3,10 @@ from __future__ import unicode_literals
 
 from django.apps import apps
 
-from .. import Warning, register
+from .. import Warning, register, Tags
 
 
-@register('compatibility')
+@register(Tags.compatibility)
 def check_1_6_compatibility(**kwargs):
     errors = []
     errors.extend(_check_test_runner(**kwargs))
@@ -78,7 +78,7 @@ def _check_test_runner(app_configs=None, **kwargs):
                 hint=("Django 1.6 introduced a new default test runner. It looks like "
                       "this project was generated using Django 1.5 or earlier. You should "
                       "ensure your tests are all running & behaving as expected. See "
-                      "https://docs.djangoproject.com/en/dev/releases/1.6/#discovery-of-tests-in-any-test-module "
+                      "https://docs.djangoproject.com/en/dev/releases/1.6/#new-test-runner "
                       "for more information."),
                 obj=None,
                 id='1_6.W001',
@@ -105,7 +105,7 @@ def _check_boolean_field_default_value(app_configs=None, **kwargs):
 
     return [
         Warning(
-            "BooleanField does not have a default value. ",
+            "BooleanField does not have a default value.",
             hint=("Django 1.6 changed the default value of BooleanField from False to None. "
                   "See https://docs.djangoproject.com/en/1.6/ref/models/fields/#booleanfield "
                   "for more information."),

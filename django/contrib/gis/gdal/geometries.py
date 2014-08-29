@@ -43,14 +43,11 @@ import sys
 from binascii import a2b_hex, b2a_hex
 from ctypes import byref, string_at, c_char_p, c_double, c_ubyte, c_void_p
 
-from django.contrib.gis import memoryview
-
 # Getting GDAL prerequisites
 from django.contrib.gis.gdal.base import GDALBase
 from django.contrib.gis.gdal.envelope import Envelope, OGREnvelope
 from django.contrib.gis.gdal.error import OGRException, OGRIndexError, SRSException
 from django.contrib.gis.gdal.geomtype import OGRGeomType
-from django.contrib.gis.gdal.libgdal import GDAL_VERSION
 from django.contrib.gis.gdal.srs import SpatialReference, CoordTransform
 
 # Getting the ctypes prototype functions that interface w/the GDAL C library.
@@ -78,7 +75,7 @@ class OGRGeometry(GDALBase):
 
         # If HEX, unpack input to a binary buffer.
         if str_instance and hex_regex.match(geom_input):
-            geom_input = memoryview(a2b_hex(geom_input.upper().encode()))
+            geom_input = six.memoryview(a2b_hex(geom_input.upper().encode()))
             str_instance = False
 
         # Constructing the geometry,
@@ -103,7 +100,7 @@ class OGRGeometry(GDALBase):
                 # (e.g., 'Point', 'POLYGON').
                 OGRGeomType(geom_input)
                 g = capi.create_geom(OGRGeomType(geom_input).num)
-        elif isinstance(geom_input, memoryview):
+        elif isinstance(geom_input, six.memoryview):
             # WKB was passed in
             g = capi.from_wkb(bytes(geom_input), None, byref(c_void_p()), len(geom_input))
         elif isinstance(geom_input, OGRGeomType):
@@ -205,7 +202,7 @@ class OGRGeometry(GDALBase):
 
     def _set_coord_dim(self, dim):
         "Sets the coordinate dimension of this Geometry."
-        if not dim in (2, 3):
+        if dim not in (2, 3):
             raise ValueError('Geometry dimension must be either 2 or 3')
         capi.set_coord_dim(self.ptr, dim)
 
@@ -347,7 +344,7 @@ class OGRGeometry(GDALBase):
         buf = (c_ubyte * sz)()
         capi.to_wkb(self.ptr, byteorder, byref(buf))
         # Returning a buffer of the string at the pointer.
-        return memoryview(string_at(buf, sz))
+        return six.memoryview(string_at(buf, sz))
 
     @property
     def wkt(self):
@@ -391,14 +388,6 @@ class OGRGeometry(GDALBase):
             klone.transform(coord_trans)
             return klone
 
-        # Have to get the coordinate dimension of the original geometry
-        # so it can be used to reset the transformed geometry's dimension
-        # afterwards.  This is done because of GDAL bug (in versions prior
-        # to 1.7) that turns geometries 3D after transformation, see:
-        #  http://trac.osgeo.org/gdal/changeset/17792
-        if GDAL_VERSION < (1, 7):
-            orig_dim = self.coord_dim
-
         # Depending on the input type, use the appropriate OGR routine
         # to perform the transformation.
         if isinstance(coord_trans, CoordTransform):
@@ -411,20 +400,6 @@ class OGRGeometry(GDALBase):
         else:
             raise TypeError('Transform only accepts CoordTransform, '
                             'SpatialReference, string, and integer objects.')
-
-        # Setting with original dimension, see comment above.
-        if GDAL_VERSION < (1, 7):
-            if isinstance(self, GeometryCollection):
-                # With geometry collections have to set dimension on
-                # each internal geometry reference, as the collection
-                # dimension isn't affected.
-                for i in xrange(len(self)):
-                    internal_ptr = capi.get_geom_ref(self.ptr, i)
-                    if orig_dim != capi.get_coord_dim(internal_ptr):
-                        capi.set_coord_dim(internal_ptr, orig_dim)
-            else:
-                if self.coord_dim != orig_dim:
-                    self.coord_dim = orig_dim
 
     def transform_to(self, srs):
         "For backwards-compatibility."

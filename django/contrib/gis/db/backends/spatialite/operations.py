@@ -65,17 +65,25 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
     name = 'spatialite'
     spatialite = True
     version_regex = re.compile(r'^(?P<major>\d)\.(?P<minor1>\d)\.(?P<minor2>\d+)')
-    valid_aggregates = {'Extent', 'Union'}
+
+    @property
+    def valid_aggregates(self):
+        if self.spatial_version >= 3:
+            return {'Collect', 'Extent', 'Union'}
+        else:
+            return {'Union'}
 
     Adapter = SpatiaLiteAdapter
     Adaptor = Adapter  # Backwards-compatibility alias.
 
     area = 'Area'
     centroid = 'Centroid'
+    collect = 'Collect'
     contained = 'MbrWithin'
     difference = 'Difference'
     distance = 'Distance'
     envelope = 'Envelope'
+    extent = 'Extent'
     intersection = 'Intersection'
     length = 'GLength'  # OpenGis defines Length, but this conflicts with an SQLite reserved keyword
     num_geom = 'NumGeometries'
@@ -140,17 +148,15 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
                 'database (error was "%s").  Was the SpatiaLite initialization '
                 'SQL loaded on this database?') % (self.connection.settings_dict['NAME'], msg)
             six.reraise(ImproperlyConfigured, ImproperlyConfigured(new_msg), sys.exc_info()[2])
-        if version < (2, 3, 0):
+        if version < (2, 4, 0):
             raise ImproperlyConfigured('GeoDjango only supports SpatiaLite versions '
-                                       '2.3.0 and above')
+                                       '2.4.0 and above')
         return version
 
     @property
     def _version_greater_2_4_0_rc4(self):
         if self.spatial_version >= (2, 4, 1):
             return True
-        elif self.spatial_version < (2, 4, 0):
-            return False
         else:
             # Spatialite 2.4.0-RC4 added AsGML and AsKML, however both
             # RC2 (shipped in popular Debian/Ubuntu packages) and RC4
@@ -181,6 +187,15 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
         super(SpatiaLiteOperations, self).check_aggregate_support(aggregate)
         agg_name = aggregate.__class__.__name__
         return agg_name in self.valid_aggregates
+
+    def convert_extent(self, box):
+        """
+        Convert the polygon data received from Spatialite to min/max values.
+        """
+        shell = Geometry(box).shell
+        xmin, ymin = shell[0][:2]
+        xmax, ymax = shell[2][:2]
+        return (xmin, ymin, xmax, ymax)
 
     def convert_geom(self, wkt, geo_field):
         """
@@ -233,7 +248,7 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
                 placeholder = '%s(%%s, %s)' % (self.transform, f.srid)
             else:
                 placeholder = '%s'
-            # No geometry value used for F expression, substitue in
+            # No geometry value used for F expression, substitute in
             # the column name instead.
             return placeholder % self.get_expression_column(value)
         else:
@@ -247,7 +262,7 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
         """
         Helper routine for calling SpatiaLite functions and returning
         their result.
-        Any error occuring in this method should be handled by the caller.
+        Any error occurring in this method should be handled by the caller.
         """
         cursor = self.connection._cursor()
         try:
@@ -274,24 +289,7 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
         Returns the SpatiaLite version as a tuple (version string, major,
         minor, subminor).
         """
-        # Getting the SpatiaLite version.
-        try:
-            version = self.spatialite_version()
-        except DatabaseError:
-            # The `spatialite_version` function first appeared in version 2.3.1
-            # of SpatiaLite, so doing a fallback test for 2.3.0 (which is
-            # used by popular Debian/Ubuntu packages).
-            version = None
-            try:
-                tmp = self._get_spatialite_func("X(GeomFromText('POINT(1 1)'))")
-                if tmp == 1.0:
-                    version = '2.3.0'
-            except DatabaseError:
-                pass
-            # If no version string defined, then just re-raise the original
-            # exception.
-            if version is None:
-                raise
+        version = self.spatialite_version()
 
         m = self.version_regex.match(version)
         if m:
@@ -310,7 +308,7 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
         """
         agg_name = agg.__class__.__name__
         if not self.check_aggregate_support(agg):
-            raise NotImplementedError('%s spatial aggregate is not implmented for this backend.' % agg_name)
+            raise NotImplementedError('%s spatial aggregate is not implemented for this backend.' % agg_name)
         agg_name = agg_name.lower()
         if agg_name == 'union':
             agg_name += 'agg'
@@ -372,9 +370,9 @@ class SpatiaLiteOperations(DatabaseOperations, BaseSpatialOperations):
 
     # Routines for getting the OGC-compliant models.
     def geometry_columns(self):
-        from django.contrib.gis.db.backends.spatialite.models import GeometryColumns
-        return GeometryColumns
+        from django.contrib.gis.db.backends.spatialite.models import SpatialiteGeometryColumns
+        return SpatialiteGeometryColumns
 
     def spatial_ref_sys(self):
-        from django.contrib.gis.db.backends.spatialite.models import SpatialRefSys
-        return SpatialRefSys
+        from django.contrib.gis.db.backends.spatialite.models import SpatialiteSpatialRefSys
+        return SpatialiteSpatialRefSys

@@ -98,7 +98,7 @@ class Settings(BaseSettings):
                 % (self.SETTINGS_MODULE, e)
             )
 
-        tuple_settings = ("INSTALLED_APPS", "TEMPLATE_DIRS")
+        tuple_settings = ("INSTALLED_APPS", "TEMPLATE_DIRS", "LOCALE_PATHS")
         self._explicit_settings = set()
         for setting in dir(mod):
             if setting.isupper():
@@ -153,11 +153,12 @@ class UserSettingsHolder(BaseSettings):
 
     def __setattr__(self, name, value):
         self._deleted.discard(name)
-        return super(UserSettingsHolder, self).__setattr__(name, value)
+        super(UserSettingsHolder, self).__setattr__(name, value)
 
     def __delattr__(self, name):
         self._deleted.add(name)
-        return super(UserSettingsHolder, self).__delattr__(name)
+        if hasattr(self, name):
+            super(UserSettingsHolder, self).__delattr__(name)
 
     def __dir__(self):
         return list(self.__dict__) + dir(self.default_settings)

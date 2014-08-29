@@ -4,11 +4,13 @@ import re
 from functools import partial
 from importlib import import_module
 from inspect import getargspec, getcallargs
+import warnings
 
 from django.apps import apps
 from django.conf import settings
 from django.template.context import (BaseContext, Context, RequestContext,  # NOQA: imported for backwards compatibility
     ContextPopException)
+from django.utils.deprecation import RemovedInDjango20Warning
 from django.utils.itercompat import is_iterable
 from django.utils.text import (smart_split, unescape_string_literal,
     get_text_list)
@@ -69,7 +71,7 @@ libraries = {}
 builtins = []
 
 # True if TEMPLATE_STRING_IF_INVALID contains a format string (%s). None means
-# uninitialised.
+# uninitialized.
 invalid_var_format_string = None
 
 
@@ -545,9 +547,6 @@ class FilterExpression(object):
         2
         >>> fe.var
         <Variable: 'variable'>
-
-    This class should never be instantiated outside of the
-    get_filters_from_token helper function.
     """
     def __init__(self, token, parser):
         self.token = token
@@ -661,6 +660,9 @@ def resolve_variable(path, context):
 
     Deprecated; use the Variable class instead.
     """
+    warnings.warn("resolve_variable() is deprecated. Use django.template."
+                  "Variable(path).resolve(context) instead",
+                  RemovedInDjango20Warning, stacklevel=2)
     return Variable(path).resolve(context)
 
 
@@ -771,7 +773,10 @@ class Variable(object):
                         if isinstance(current, BaseContext) and getattr(type(current), bit):
                             raise AttributeError
                         current = getattr(current, bit)
-                    except (TypeError, AttributeError):
+                    except (TypeError, AttributeError) as e:
+                        # Reraise an AttributeError raised by a @property
+                        if isinstance(e, AttributeError) and not isinstance(current, BaseContext) and bit in dir(current):
+                            raise
                         try:  # list-index lookup
                             current = current[int(bit)]
                         except (IndexError,  # list index out of range

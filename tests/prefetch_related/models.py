@@ -66,6 +66,11 @@ class BookWithYear(Book):
         AuthorWithAge, related_name='books_with_year')
 
 
+class Bio(models.Model):
+    author = models.OneToOneField(Author)
+    books = models.ManyToManyField(Book, blank=True)
+
+
 @python_2_unicode_compatible
 class Reader(models.Model):
     name = models.CharField(max_length=50)
@@ -145,11 +150,11 @@ class TaggedItem(models.Model):
 
 class Bookmark(models.Model):
     url = models.URLField()
-    tags = GenericRelation(TaggedItem, related_name='bookmarks')
+    tags = GenericRelation(TaggedItem, related_query_name='bookmarks')
     favorite_tags = GenericRelation(TaggedItem,
                                     content_type_field='favorite_ct',
                                     object_id_field='favorite_fkey',
-                                    related_name='favorite_bookmarks')
+                                    related_query_name='favorite_bookmarks')
 
     class Meta:
         ordering = ['id']
@@ -170,8 +175,10 @@ class Comment(models.Model):
 ## Models for lookup ordering tests
 
 class House(models.Model):
+    name = models.CharField(max_length=50)
     address = models.CharField(max_length=255)
     owner = models.ForeignKey('Person', null=True)
+    main_room = models.OneToOneField('Room', related_name='main_room_of', null=True)
 
     class Meta:
         ordering = ['id']
@@ -193,6 +200,10 @@ class Person(models.Model):
     def primary_house(self):
         # Assume business logic forces every person to have at least one house.
         return sorted(self.houses.all(), key=lambda house: -house.rooms.count())[0]
+
+    @property
+    def all_houses(self):
+        return list(self.houses.all())
 
     class Meta:
         ordering = ['id']

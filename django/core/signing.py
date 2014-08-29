@@ -10,7 +10,7 @@ There are two components here, separated by a ':'. The first component is a
 URLsafe base64 encoded JSON of the object passed to dumps(). The second
 component is a base64 encoded hmac/SHA1 hash of "$first_component:$secret"
 
-signing.loads(s) checks the signature and returns the deserialised object.
+signing.loads(s) checks the signature and returns the deserialized object.
 If the signature fails, a BadSignature exception is raised.
 
 >>> signing.loads("ImhlbGxvIg:1QaUZC:YIye-ze3TTx7gtSv422nZA4sgmk")
@@ -165,7 +165,7 @@ class Signer(object):
 
     def unsign(self, signed_value):
         signed_value = force_str(signed_value)
-        if not self.sep in signed_value:
+        if self.sep not in signed_value:
             raise BadSignature('No "%s" found in value' % self.sep)
         value, sig = signed_value.rsplit(self.sep, 1)
         if constant_time_compare(sig, self.signature(value)):

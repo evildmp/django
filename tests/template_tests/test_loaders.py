@@ -117,7 +117,7 @@ class EggLoaderTest(TestCase):
 class CachedLoader(TestCase):
     def test_templatedir_caching(self):
         "Check that the template directories form part of the template cache key. Refs #13573"
-        # Retrive a template specifying a template directory to check
+        # Retrieve a template specifying a template directory to check
         t1, name = loader.find_template('test.html', (os.path.join(os.path.dirname(upath(__file__)), 'templates', 'first'),))
         # Now retrieve the same template name, but from a different directory
         t2, name = loader.find_template('test.html', (os.path.join(os.path.dirname(upath(__file__)), 'templates', 'second'),))
@@ -148,17 +148,17 @@ class CachedLoader(TestCase):
 )
 class RenderToStringTest(TestCase):
     def test_basic(self):
-        self.assertEqual(loader.render_to_string('test_context.html'), 'obj:')
+        self.assertEqual(loader.render_to_string('test_context.html'), 'obj:\n')
 
     def test_basic_context(self):
         self.assertEqual(loader.render_to_string('test_context.html',
-                                                 {'obj': 'test'}), 'obj:test')
+                                                 {'obj': 'test'}), 'obj:test\n')
 
     def test_existing_context_kept_clean(self):
         context = Context({'obj': 'before'})
         output = loader.render_to_string('test_context.html', {'obj': 'after'},
                                          context_instance=context)
-        self.assertEqual(output, 'obj:after')
+        self.assertEqual(output, 'obj:after\n')
         self.assertEqual(context['obj'], 'before')
 
     def test_empty_list(self):

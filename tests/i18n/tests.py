@@ -1,12 +1,15 @@
 # -*- encoding: utf-8 -*-
 from __future__ import unicode_literals
 
+from contextlib import contextmanager
 import datetime
 import decimal
+import gettext as gettext_module
 from importlib import import_module
 import os
 import pickle
 from threading import local
+from unittest import skipUnless
 
 from django.conf import settings
 from django.template import Template, Context
@@ -28,7 +31,7 @@ from django.utils.translation import (activate, deactivate,
     ugettext, ugettext_lazy,
     ngettext_lazy,
     ungettext_lazy,
-    pgettext,
+    pgettext, pgettext_lazy,
     npgettext, npgettext_lazy,
     check_for_language,
     string_concat, LANGUAGE_SESSION_KEY)
@@ -43,6 +46,19 @@ extended_locale_paths = settings.LOCALE_PATHS + (
 )
 
 
+@contextmanager
+def patch_formats(lang, **settings):
+    from django.utils.formats import _format_cache
+
+    # Populate _format_cache with temporary values
+    for key, value in settings.items():
+        _format_cache[(key, lang)] = value
+    try:
+        yield
+    finally:
+        reset_format_cache()
+
+
 class TranslationTests(TestCase):
 
     def test_override(self):
@@ -54,6 +70,43 @@ class TranslationTests(TestCase):
             with translation.override(None):
                 self.assertEqual(get_language(), settings.LANGUAGE_CODE)
             self.assertEqual(get_language(), 'de')
+        finally:
+            deactivate()
+
+    def test_override_decorator(self):
+
+        @translation.override('pl')
+        def func_pl():
+            self.assertEqual(get_language(), 'pl')
+
+        @translation.override(None)
+        def func_none():
+            self.assertEqual(get_language(), settings.LANGUAGE_CODE)
+
+        try:
+            activate('de')
+            func_pl()
+            self.assertEqual(get_language(), 'de')
+            func_none()
+            self.assertEqual(get_language(), 'de')
+        finally:
+            deactivate()
+
+    def test_override_exit(self):
+        """
+        Test that the language restored is the one used when the function was
+        called, not the one used when the decorator was initialized. refs #23381
+        """
+        activate('fr')
+        @translation.override('pl')
+        def func_pl():
+            pass
+        deactivate()
+
+        try:
+            activate('en')
+            func_pl()
+            self.assertEqual(get_language(), 'en')
         finally:
             deactivate()
 
@@ -79,9 +132,20 @@ class TranslationTests(TestCase):
         s4 = ugettext_lazy('Some other string')
         self.assertEqual(False, s == s4)
 
-        if six.PY2:
-            # On Python 2, gettext_lazy should not transform a bytestring to unicode
-            self.assertEqual(gettext_lazy(b"test").upper(), b"TEST")
+    @skipUnless(six.PY2, "No more bytestring translations on PY3")
+    def test_lazy_and_bytestrings(self):
+        # On Python 2, (n)gettext_lazy should not transform a bytestring to unicode
+        self.assertEqual(gettext_lazy(b"test").upper(), b"TEST")
+        self.assertEqual((ngettext_lazy(b"%d test", b"%d tests") % 1).upper(), b"1 TEST")
+
+        # Other versions of lazy functions always return unicode
+        self.assertEqual(ugettext_lazy(b"test").upper(), "TEST")
+        self.assertEqual((ungettext_lazy(b"%d test", b"%d tests") % 1).upper(), "1 TEST")
+        self.assertEqual(pgettext_lazy(b"context", b"test").upper(), "TEST")
+        self.assertEqual(
+            (npgettext_lazy(b"context", b"%d test", b"%d tests") % 1).upper(),
+            "1 TEST"
+        )
 
     def test_lazy_pickle(self):
         s1 = ugettext_lazy("test")
@@ -482,31 +546,17 @@ class FormattingTests(TestCase):
         conditional test (e.g. 0 or empty string).
         Refs #16938.
         """
-        from django.conf.locale.fr import formats as fr_formats
+        with patch_formats('fr', THOUSAND_SEPARATOR='', FIRST_DAY_OF_WEEK=0):
+            with translation.override('fr'):
+                with self.settings(USE_THOUSAND_SEPARATOR=True, THOUSAND_SEPARATOR='!'):
+                    self.assertEqual('', get_format('THOUSAND_SEPARATOR'))
+                    # Even a second time (after the format has been cached)...
+                    self.assertEqual('', get_format('THOUSAND_SEPARATOR'))
 
-        # Back up original formats
-        backup_THOUSAND_SEPARATOR = fr_formats.THOUSAND_SEPARATOR
-        backup_FIRST_DAY_OF_WEEK = fr_formats.FIRST_DAY_OF_WEEK
-
-        # Set formats that would get interpreted as False in a conditional test
-        fr_formats.THOUSAND_SEPARATOR = ''
-        fr_formats.FIRST_DAY_OF_WEEK = 0
-
-        reset_format_cache()
-        with translation.override('fr'):
-            with self.settings(USE_THOUSAND_SEPARATOR=True, THOUSAND_SEPARATOR='!'):
-                self.assertEqual('', get_format('THOUSAND_SEPARATOR'))
-                # Even a second time (after the format has been cached)...
-                self.assertEqual('', get_format('THOUSAND_SEPARATOR'))
-
-            with self.settings(FIRST_DAY_OF_WEEK=1):
-                self.assertEqual(0, get_format('FIRST_DAY_OF_WEEK'))
-                # Even a second time (after the format has been cached)...
-                self.assertEqual(0, get_format('FIRST_DAY_OF_WEEK'))
-
-        # Restore original formats
-        fr_formats.THOUSAND_SEPARATOR = backup_THOUSAND_SEPARATOR
-        fr_formats.FIRST_DAY_OF_WEEK = backup_FIRST_DAY_OF_WEEK
+                with self.settings(FIRST_DAY_OF_WEEK=1):
+                    self.assertEqual(0, get_format('FIRST_DAY_OF_WEEK'))
+                    # Even a second time (after the format has been cached)...
+                    self.assertEqual(0, get_format('FIRST_DAY_OF_WEEK'))
 
     def test_l10n_enabled(self):
         self.maxDiff = 3000
@@ -721,15 +771,37 @@ class FormattingTests(TestCase):
             with self.settings(USE_THOUSAND_SEPARATOR=True, USE_L10N=False):
                 self.assertEqual(sanitize_separators('12\xa0345'), '12\xa0345')
 
+        with patch_formats(get_language(), THOUSAND_SEPARATOR='.', DECIMAL_SEPARATOR=','):
+            with self.settings(USE_THOUSAND_SEPARATOR=True):
+                self.assertEqual(sanitize_separators('10.234'), '10234')
+                # Suspicion that user entered dot as decimal separator (#22171)
+                self.assertEqual(sanitize_separators('10.10'), '10.10')
+
     def test_iter_format_modules(self):
         """
         Tests the iter_format_modules function.
         """
+        # Importing some format modules so that we can compare the returned
+        # modules with these expected modules
+        default_mod = import_module('django.conf.locale.de.formats')
+        test_mod = import_module('i18n.other.locale.de.formats')
+        test_mod2 = import_module('i18n.other2.locale.de.formats')
+
         with translation.override('de-at', deactivate=True):
-            de_format_mod = import_module('django.conf.locale.de.formats')
-            self.assertEqual(list(iter_format_modules('de')), [de_format_mod])
-            test_de_format_mod = import_module('i18n.other.locale.de.formats')
-            self.assertEqual(list(iter_format_modules('de', 'i18n.other.locale')), [test_de_format_mod, de_format_mod])
+            # Should return the correct default module when no setting is set
+            self.assertEqual(list(iter_format_modules('de')), [default_mod])
+
+            # When the setting is a string, should return the given module and
+            # the default module
+            self.assertEqual(
+                list(iter_format_modules('de', 'i18n.other.locale')),
+                [test_mod, default_mod])
+
+            # When setting is a list of strings, should return the given
+            # modules and the default module
+            self.assertEqual(
+                list(iter_format_modules('de', ['i18n.other.locale', 'i18n.other2.locale'])),
+                [test_mod, test_mod2, default_mod])
 
     def test_iter_format_modules_stability(self):
         """
@@ -821,10 +893,10 @@ class MiscTests(TestCase):
         p = trans_real.parse_accept_lang_header
         # Good headers.
         self.assertEqual([('de', 1.0)], p('de'))
-        self.assertEqual([('en-AU', 1.0)], p('en-AU'))
+        self.assertEqual([('en-au', 1.0)], p('en-AU'))
         self.assertEqual([('es-419', 1.0)], p('es-419'))
         self.assertEqual([('*', 1.0)], p('*;q=1.00'))
-        self.assertEqual([('en-AU', 0.123)], p('en-AU;q=0.123'))
+        self.assertEqual([('en-au', 0.123)], p('en-AU;q=0.123'))
         self.assertEqual([('en-au', 0.5)], p('en-au;q=0.5'))
         self.assertEqual([('en-au', 1.0)], p('en-au;q=1.0'))
         self.assertEqual([('da', 1.0), ('en', 0.5), ('en-gb', 0.25)], p('da, en-gb;q=0.25, en;q=0.5'))
@@ -884,6 +956,24 @@ class MiscTests(TestCase):
         r.META = {'HTTP_ACCEPT_LANGUAGE': 'zh-cn,de'}
         self.assertEqual(g(r), 'zh-cn')
 
+        r.META = {'HTTP_ACCEPT_LANGUAGE': 'NL'}
+        self.assertEqual('nl', g(r))
+
+        r.META = {'HTTP_ACCEPT_LANGUAGE': 'fy'}
+        self.assertEqual('fy', g(r))
+
+        r.META = {'HTTP_ACCEPT_LANGUAGE': 'ia'}
+        self.assertEqual('ia', g(r))
+
+        r.META = {'HTTP_ACCEPT_LANGUAGE': 'sr-latn'}
+        self.assertEqual('sr-latn', g(r))
+
+        r.META = {'HTTP_ACCEPT_LANGUAGE': 'zh-hans'}
+        self.assertEqual('zh-hans', g(r))
+
+        r.META = {'HTTP_ACCEPT_LANGUAGE': 'zh-hant'}
+        self.assertEqual('zh-hant', g(r))
+
     @override_settings(
         LANGUAGES=(
             ('en', 'English'),
@@ -935,6 +1025,16 @@ class MiscTests(TestCase):
 
         r.META = {'HTTP_ACCEPT_LANGUAGE': 'zh-tw,en'}
         self.assertEqual(g(r), 'zh-tw')
+
+    def test_special_fallback_language(self):
+        """
+        Some languages may have special fallbacks that don't follow the simple
+        'fr-ca' -> 'fr' logic (notably Chinese codes).
+        """
+        r = self.rf.get('/')
+        r.COOKIES = {}
+        r.META = {'HTTP_ACCEPT_LANGUAGE': 'zh-my,en'}
+        self.assertEqual(get_language_from_request(r), 'zh-hans')
 
     def test_parse_language_cookie(self):
         """
@@ -1109,6 +1209,16 @@ class TestLanguageInfo(TestCase):
     def test_unknown_language_code_and_country_code(self):
         six.assertRaisesRegex(self, KeyError, r"Unknown language code xx-xx and xx\.", get_language_info, 'xx-xx')
 
+    def test_fallback_language_code(self):
+        """
+        get_language_info return the first fallback language info if the lang_info
+        struct does not contain the 'name' key.
+        """
+        li = get_language_info('zh-my')
+        self.assertEqual(li['code'], 'zh-hans')
+        li = get_language_info('zh-cn')
+        self.assertEqual(li['code'], 'zh-cn')
+
 
 class MultipleLocaleActivationTests(TestCase):
     """
@@ -1243,10 +1353,9 @@ class MultipleLocaleActivationTests(TestCase):
         'django.middleware.locale.LocaleMiddleware',
         'django.middleware.common.CommonMiddleware',
     ),
+    ROOT_URLCONF='i18n.urls',
 )
 class LocaleMiddlewareTests(TestCase):
-
-    urls = 'i18n.urls'
 
     def test_streaming_response(self):
         # Regression test for #5241
@@ -1281,10 +1390,9 @@ class LocaleMiddlewareTests(TestCase):
         'django.middleware.locale.LocaleMiddleware',
         'django.middleware.common.CommonMiddleware',
     ),
+    ROOT_URLCONF='i18n.urls'
 )
 class CountrySpecificLanguageTests(TestCase):
-
-    urls = 'i18n.urls'
 
     def setUp(self):
         super(CountrySpecificLanguageTests, self).setUp()
@@ -1322,3 +1430,26 @@ class CountrySpecificLanguageTests(TestCase):
         r.META = {'HTTP_ACCEPT_LANGUAGE': 'pt-pt,en-US;q=0.8,en;q=0.6,ru;q=0.4'}
         lang = get_language_from_request(r)
         self.assertEqual('pt-br', lang)
+
+
+class TranslationFilesMissing(TestCase):
+
+    def setUp(self):
+        super(TranslationFilesMissing, self).setUp()
+        self.gettext_find_builtin = gettext_module.find
+
+    def tearDown(self):
+        gettext_module.find = self.gettext_find_builtin
+        super(TranslationFilesMissing, self).tearDown()
+
+    def patchGettextFind(self):
+        gettext_module.find = lambda *args, **kw: None
+
+    def test_failure_finding_default_mo_files(self):
+        '''
+        Ensure IOError is raised if the default language is unparseable.
+        Refs: #18192
+        '''
+        self.patchGettextFind()
+        trans_real._translations = {}
+        self.assertRaises(IOError, activate, 'en')

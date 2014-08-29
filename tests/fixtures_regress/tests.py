@@ -7,6 +7,7 @@ import os
 import re
 import warnings
 
+from django.core import serializers
 from django.core.serializers.base import DeserializationError
 from django.core import management
 from django.core.management.base import CommandError
@@ -23,7 +24,12 @@ from django.utils.six import PY3, StringIO
 
 from .models import (Animal, Stuff, Absolute, Parent, Child, Article, Widget,
     Store, Person, Book, NKChild, RefToNKChild, Circle1, Circle2, Circle3,
-    ExternalDependency, Thingy)
+    ExternalDependency, Thingy,
+    M2MSimpleA, M2MSimpleB, M2MSimpleCircularA, M2MSimpleCircularB,
+    M2MComplexA, M2MComplexB, M2MThroughAB, M2MComplexCircular1A,
+    M2MComplexCircular1B, M2MComplexCircular1C, M2MCircular1ThroughAB,
+    M2MCircular1ThroughBC, M2MCircular1ThroughCA, M2MComplexCircular2A,
+    M2MComplexCircular2B, M2MCircular2ThroughAB)
 
 _cur_dir = os.path.dirname(os.path.abspath(upath(__file__)))
 
@@ -64,7 +70,7 @@ class TestFixtures(TestCase):
     def test_loaddata_not_found_fields_not_ignore(self):
         """
         Test for ticket #9279 -- Error is raised for entries in
-        the serialised data for fields that have been removed
+        the serialized data for fields that have been removed
         from the database when not ignored.
         """
         with self.assertRaises(DeserializationError):
@@ -77,7 +83,7 @@ class TestFixtures(TestCase):
     def test_loaddata_not_found_fields_ignore(self):
         """
         Test for ticket #9279 -- Ignores entries in
-        the serialised data for fields that have been removed
+        the serialized data for fields that have been removed
         from the database.
         """
         management.call_command(
@@ -90,7 +96,7 @@ class TestFixtures(TestCase):
 
     def test_loaddata_not_found_fields_ignore_xml(self):
         """
-        Test for ticket #19998 -- Ignore entries in the XML serialised data
+        Test for ticket #19998 -- Ignore entries in the XML serialized data
         for fields that have been removed from the model definition.
         """
         management.call_command(
@@ -372,7 +378,7 @@ class TestFixtures(TestCase):
 
         # Get rid of artifacts like '000000002' to eliminate the differences
         # between different Python versions.
-        data = re.sub('0{6,}\d', '', data)
+        data = re.sub('0{6,}[0-9]', '', data)
 
         animals_data = sorted([
             {"pk": 1, "model": "fixtures_regress.animal", "fields": {"count": 3, "weight": 1.2, "name": "Lion", "latin_name": "Panthera leo"}},
@@ -405,6 +411,7 @@ class TestFixtures(TestCase):
             % widget.pk
         )
 
+    @skipUnlessDBFeature('supports_forward_references')
     def test_loaddata_works_when_fixture_has_forward_refs(self):
         """
         Regression for #3615 - Forward references cause fixtures not to load in MySQL (InnoDB)
@@ -429,6 +436,7 @@ class TestFixtures(TestCase):
                 verbosity=0,
             )
 
+    @skipUnlessDBFeature('supports_forward_references')
     @override_settings(FIXTURE_DIRS=[os.path.join(_cur_dir, 'fixtures_1'),
                                      os.path.join(_cur_dir, 'fixtures_2')])
     def test_loaddata_forward_refs_split_fixtures(self):
@@ -477,6 +485,18 @@ class TestFixtures(TestCase):
         management.call_command(
             'loaddata',
             'special-article.json',
+            verbosity=0,
+        )
+
+    def test_ticket_22421(self):
+        """
+        Regression for ticket #22421 -- loaddata on a model that inherits from
+        a grand-parent model with a M2M but via an abstract parent shouldn't
+        blow up.
+        """
+        management.call_command(
+            'loaddata',
+            'feature.json',
             verbosity=0,
         )
 
@@ -700,6 +720,121 @@ class NaturalKeyFixtureTests(TestCase):
             books.__repr__(),
             """[<Book: Cryptonomicon by Neal Stephenson (available at Amazon, Borders)>, <Book: Ender's Game by Orson Scott Card (available at Collins Bookstore)>, <Book: Permutation City by Greg Egan (available at Angus and Robertson)>]"""
         )
+
+
+class M2MNaturalKeyFixtureTests(TestCase):
+    """Tests for ticket #14426."""
+
+    def test_dependency_sorting_m2m_simple(self):
+        """
+        M2M relations without explicit through models SHOULD count as dependencies
+
+        Regression test for bugs that could be caused by flawed fixes to
+        #14226, namely if M2M checks are removed from sort_dependencies
+        altogether.
+        """
+        sorted_deps = sort_dependencies(
+            [('fixtures_regress', [M2MSimpleA, M2MSimpleB])]
+        )
+        self.assertEqual(sorted_deps, [M2MSimpleB, M2MSimpleA])
+
+    def test_dependency_sorting_m2m_simple_circular(self):
+        """
+        Resolving circular M2M relations without explicit through models should
+        fail loudly
+        """
+        self.assertRaisesMessage(
+            CommandError,
+            "Can't resolve dependencies for fixtures_regress.M2MSimpleCircularA, "
+            "fixtures_regress.M2MSimpleCircularB in serialized app list.",
+            sort_dependencies,
+            [('fixtures_regress', [M2MSimpleCircularA, M2MSimpleCircularB])]
+        )
+
+    def test_dependency_sorting_m2m_complex(self):
+        """
+        M2M relations with explicit through models should NOT count as
+        dependencies.  The through model itself will have dependencies, though.
+        """
+        sorted_deps = sort_dependencies(
+            [('fixtures_regress', [M2MComplexA, M2MComplexB, M2MThroughAB])]
+        )
+        # Order between M2MComplexA and M2MComplexB doesn't matter. The through
+        # model has dependencies to them though, so it should come last.
+        self.assertEqual(sorted_deps[-1], M2MThroughAB)
+
+    def test_dependency_sorting_m2m_complex_circular_1(self):
+        """
+        Circular M2M relations with explicit through models should be serializable
+        """
+        A, B, C, AtoB, BtoC, CtoA = (M2MComplexCircular1A, M2MComplexCircular1B,
+                                     M2MComplexCircular1C, M2MCircular1ThroughAB,
+                                     M2MCircular1ThroughBC, M2MCircular1ThroughCA)
+        try:
+            sorted_deps = sort_dependencies(
+                [('fixtures_regress', [A, B, C, AtoB, BtoC, CtoA])]
+            )
+        except CommandError:
+            self.fail("Serialization dependency solving algorithm isn't "
+                      "capable of handling circular M2M setups with "
+                      "intermediate models.")
+
+        # The dependency sorting should not result in an error, and the
+        # through model should have dependencies to the other models and as
+        # such come last in the list.
+        self.assertEqual(sorted_deps[:3], [A, B, C])
+        self.assertEqual(sorted_deps[3:], [AtoB, BtoC, CtoA])
+
+    def test_dependency_sorting_m2m_complex_circular_2(self):
+        """
+        Circular M2M relations with explicit through models should be serializable
+        This test tests the circularity with explicit natural_key.dependencies
+        """
+        try:
+            sorted_deps = sort_dependencies([
+                ('fixtures_regress', [
+                    M2MComplexCircular2A,
+                    M2MComplexCircular2B,
+                    M2MCircular2ThroughAB])
+            ])
+        except CommandError:
+            self.fail("Serialization dependency solving algorithm isn't "
+                      "capable of handling circular M2M setups with "
+                      "intermediate models plus natural key dependency hints.")
+        self.assertEqual(sorted_deps[:2], [M2MComplexCircular2A, M2MComplexCircular2B])
+        self.assertEqual(sorted_deps[2:], [M2MCircular2ThroughAB])
+
+    def test_dump_and_load_m2m_simple(self):
+        """
+        Test serializing and deserializing back models with simple M2M relations
+        """
+        a = M2MSimpleA.objects.create(data="a")
+        b1 = M2MSimpleB.objects.create(data="b1")
+        b2 = M2MSimpleB.objects.create(data="b2")
+        a.b_set.add(b1)
+        a.b_set.add(b2)
+
+        stdout = StringIO()
+        management.call_command(
+            'dumpdata',
+            'fixtures_regress.M2MSimpleA',
+            'fixtures_regress.M2MSimpleB',
+            use_natural_foreign_keys=True,
+            stdout=stdout
+        )
+
+        for model in [M2MSimpleA, M2MSimpleB]:
+            model.objects.all().delete()
+
+        objects = serializers.deserialize("json", stdout.getvalue())
+        for obj in objects:
+            obj.save()
+
+        new_a = M2MSimpleA.objects.get_by_natural_key("a")
+        self.assertQuerysetEqual(new_a.b_set.all(), [
+            "<M2MSimpleB: b1>",
+            "<M2MSimpleB: b2>"
+        ], ordered=False)
 
 
 class TestTicket11101(TransactionTestCase):

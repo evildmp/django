@@ -2,7 +2,6 @@ from functools import update_wrapper
 from django.http import Http404, HttpResponseRedirect
 from django.contrib.admin import ModelAdmin, actions
 from django.contrib.auth import REDIRECT_FIELD_NAME
-from django.contrib.auth.views import redirect_to_login
 from django.views.decorators.csrf import csrf_protect
 from django.db.models.base import ModelBase
 from django.apps import apps
@@ -42,6 +41,9 @@ class AdminSite(object):
     # Text to put at the top of the admin index page.
     index_title = ugettext_lazy('Site administration')
 
+    # URL for the "View site" link at the top of each admin page.
+    site_url = '/'
+
     login_form = None
     index_template = None
     app_index_template = None
@@ -50,10 +52,9 @@ class AdminSite(object):
     password_change_template = None
     password_change_done_template = None
 
-    def __init__(self, name='admin', app_name='admin'):
+    def __init__(self, name='admin'):
         self._registry = {}  # model_class class -> admin_class instance
         self.name = name
-        self.app_name = app_name
         self._actions = {'delete_selected': actions.delete_selected}
         self._global_actions = self._actions.copy()
 
@@ -114,6 +115,12 @@ class AdminSite(object):
             if model not in self._registry:
                 raise NotRegistered('The model %s is not registered' % model.__name__)
             del self._registry[model]
+
+    def is_registered(self, model):
+        """
+        Check if a model class is registered with this `AdminSite`.
+        """
+        return model in self._registry
 
     def add_action(self, action, name=None):
         """
@@ -178,12 +185,12 @@ class AdminSite(object):
             class MyAdminSite(AdminSite):
 
                 def get_urls(self):
-                    from django.conf.urls import patterns, url
+                    from django.conf.urls import url
 
                     urls = super(MyAdminSite, self).get_urls()
-                    urls += patterns('',
+                    urls += [
                         url(r'^my_view/$', self.admin_view(some_view))
-                    )
+                    ]
                     return urls
 
         By default, admin_views are marked non-cacheable using the
@@ -195,6 +202,9 @@ class AdminSite(object):
                 if request.path == reverse('admin:logout', current_app=self.name):
                     index_path = reverse('admin:index', current_app=self.name)
                     return HttpResponseRedirect(index_path)
+                # Inner import to prevent django.contrib.admin (app) from
+                # importing django.contrib.auth.models.User (unrelated model).
+                from django.contrib.auth.views import redirect_to_login
                 return redirect_to_login(
                     request.get_full_path(),
                     reverse('admin:login', current_app=self.name)
@@ -209,7 +219,7 @@ class AdminSite(object):
         return update_wrapper(inner, view)
 
     def get_urls(self):
-        from django.conf.urls import patterns, url, include
+        from django.conf.urls import url, include
         # Since this module gets imported in the application's root package,
         # it cannot import models from other applications at the module level,
         # and django.contrib.contenttypes.views imports ContentType.
@@ -224,7 +234,7 @@ class AdminSite(object):
             return update_wrapper(wrapper, view)
 
         # Admin-site-wide views.
-        urlpatterns = patterns('',
+        urlpatterns = [
             url(r'^$', wrap(self.index), name='index'),
             url(r'^login/$', self.login, name='login'),
             url(r'^logout/$', wrap(self.logout), name='logout'),
@@ -232,15 +242,15 @@ class AdminSite(object):
             url(r'^password_change/done/$', wrap(self.password_change_done, cacheable=True), name='password_change_done'),
             url(r'^jsi18n/$', wrap(self.i18n_javascript, cacheable=True), name='jsi18n'),
             url(r'^r/(?P<content_type_id>\d+)/(?P<object_id>.+)/$', wrap(contenttype_views.shortcut), name='view_on_site'),
-        )
+        ]
 
         # Add in each model's views, and create a list of valid URLS for the
         # app_index
         valid_app_labels = []
         for model, model_admin in six.iteritems(self._registry):
-            urlpatterns += patterns('',
-                url(r'^%s/%s/' % (model._meta.app_label, model._meta.model_name), include(model_admin.urls))
-            )
+            urlpatterns += [
+                url(r'^%s/%s/' % (model._meta.app_label, model._meta.model_name), include(model_admin.urls)),
+            ]
             if model._meta.app_label not in valid_app_labels:
                 valid_app_labels.append(model._meta.app_label)
 
@@ -248,14 +258,14 @@ class AdminSite(object):
         # labels for which we need to allow access to the app_index view,
         if valid_app_labels:
             regex = r'^(?P<app_label>' + '|'.join(valid_app_labels) + ')/$'
-            urlpatterns += patterns('',
+            urlpatterns += [
                 url(regex, wrap(self.app_index), name='app_list'),
-            )
+            ]
         return urlpatterns
 
     @property
     def urls(self):
-        return self.get_urls(), self.app_name, self.name
+        return self.get_urls(), 'admin', self.name
 
     def each_context(self):
         """
@@ -265,16 +275,19 @@ class AdminSite(object):
         return {
             'site_title': self.site_title,
             'site_header': self.site_header,
+            'site_url': self.site_url,
         }
 
     def password_change(self, request):
         """
         Handles the "change password" task -- both form display and validation.
         """
+        from django.contrib.admin.forms import AdminPasswordChangeForm
         from django.contrib.auth.views import password_change
         url = reverse('admin:password_change_done', current_app=self.name)
         defaults = {
             'current_app': self.name,
+            'password_change_form': AdminPasswordChangeForm,
             'post_change_redirect': url,
             'extra_context': self.each_context(),
         }
@@ -363,10 +376,9 @@ class AdminSite(object):
         apps that have been registered in this site.
         """
         app_dict = {}
-        user = request.user
         for model, model_admin in self._registry.items():
             app_label = model._meta.app_label
-            has_module_perms = user.has_module_perms(app_label)
+            has_module_perms = model_admin.has_module_permission(request)
 
             if has_module_perms:
                 perms = model_admin.get_model_perms(request)
@@ -420,14 +432,14 @@ class AdminSite(object):
                                 current_app=self.name)
 
     def app_index(self, request, app_label, extra_context=None):
-        user = request.user
         app_name = apps.get_app_config(app_label).verbose_name
-        has_module_perms = user.has_module_perms(app_label)
-        if not has_module_perms:
-            raise PermissionDenied
         app_dict = {}
         for model, model_admin in self._registry.items():
             if app_label == model._meta.app_label:
+                has_module_perms = model_admin.has_module_permission(request)
+                if not has_module_perms:
+                    raise PermissionDenied
+
                 perms = model_admin.get_model_perms(request)
 
                 # Check whether user has any perm for this module.

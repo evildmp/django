@@ -5,18 +5,16 @@ from datetime import datetime, timedelta
 from io import BytesIO
 from itertools import chain
 import time
-from unittest import skipIf
 
-from django.db import connection, connections
-from django.core import signals
 from django.core.exceptions import SuspiciousOperation
 from django.core.handlers.wsgi import WSGIRequest, LimitedStream
 from django.http import (HttpRequest, HttpResponse, parse_cookie,
     build_request_repr, UnreadablePostError, RawPostDataException)
-from django.test import SimpleTestCase, TransactionTestCase, override_settings
+from django.test import SimpleTestCase, RequestFactory, override_settings
 from django.test.client import FakePayload
 from django.test.utils import str_prefix
 from django.utils import six
+from django.utils.encoding import force_str
 from django.utils.http import cookie_date, urlencode
 from django.utils.six.moves.urllib.parse import urlencode as original_urlencode
 from django.utils.timezone import utc
@@ -29,6 +27,13 @@ class RequestsTests(SimpleTestCase):
         self.assertEqual(list(request.POST.keys()), [])
         self.assertEqual(list(request.COOKIES.keys()), [])
         self.assertEqual(list(request.META.keys()), [])
+
+        # .GET and .POST should be QueryDicts
+        self.assertEqual(request.GET.urlencode(), '')
+        self.assertEqual(request.POST.urlencode(), '')
+
+        # and FILES should be MultiValueDict
+        self.assertEqual(request.FILES.getlist('foo'), [])
 
     def test_httprequest_repr(self):
         request = HttpRequest()
@@ -188,6 +193,13 @@ class RequestsTests(SimpleTestCase):
         # both as an output string, and using the cookie attributes
         self.assertTrue('; httponly' in str(example_cookie))
         self.assertTrue(example_cookie['httponly'])
+
+    def test_unicode_cookie(self):
+        "Verify HttpResponse.set_cookie() works with unicode data."
+        response = HttpResponse()
+        cookie_value = '清風'
+        response.set_cookie('test', cookie_value)
+        self.assertEqual(force_str(cookie_value), response.cookies['test'].value)
 
     def test_limited_stream(self):
         # Read all of a limited stream
@@ -649,8 +661,8 @@ class HostValidationTests(SimpleTestCase):
     def test_get_host_suggestion_of_allowed_host(self):
         """get_host() makes helpful suggestions if a valid-looking host is not in ALLOWED_HOSTS."""
         msg_invalid_host = "Invalid HTTP_HOST header: %r."
-        msg_suggestion = msg_invalid_host + "You may need to add %r to ALLOWED_HOSTS."
-        msg_suggestion2 = msg_invalid_host + "The domain name provided is not valid according to RFC 1034/1035"
+        msg_suggestion = msg_invalid_host + " You may need to add %r to ALLOWED_HOSTS."
+        msg_suggestion2 = msg_invalid_host + " The domain name provided is not valid according to RFC 1034/1035"
 
         for host in [  # Valid-looking hosts
             'example.com',
@@ -698,58 +710,62 @@ class HostValidationTests(SimpleTestCase):
         )
 
 
-@skipIf(connection.vendor == 'sqlite'
-        and connection.settings_dict['TEST_NAME'] in (None, '', ':memory:'),
-        "Cannot establish two connections to an in-memory SQLite database.")
-class DatabaseConnectionHandlingTests(TransactionTestCase):
-
-    available_apps = []
+class BuildAbsoluteURITestCase(SimpleTestCase):
+    """
+    Regression tests for ticket #18314.
+    """
 
     def setUp(self):
-        # Use a temporary connection to avoid messing with the main one.
-        self._old_default_connection = connections['default']
-        del connections['default']
+        self.factory = RequestFactory()
 
-    def tearDown(self):
-        try:
-            connections['default'].close()
-        finally:
-            connections['default'] = self._old_default_connection
+    def test_build_absolute_uri_no_location(self):
+        """
+        Ensures that ``request.build_absolute_uri()`` returns the proper value
+        when the ``location`` argument is not provided, and ``request.path``
+        begins with //.
+        """
+        # //// is needed to create a request with a path beginning with //
+        request = self.factory.get('////absolute-uri')
+        self.assertEqual(
+            request.build_absolute_uri(),
+            'http://testserver//absolute-uri'
+        )
 
-    def test_request_finished_db_state(self):
-        # Force closing connection on request end
-        connection.settings_dict['CONN_MAX_AGE'] = 0
+    def test_build_absolute_uri_absolute_location(self):
+        """
+        Ensures that ``request.build_absolute_uri()`` returns the proper value
+        when an absolute URL ``location`` argument is provided, and
+        ``request.path`` begins with //.
+        """
+        # //// is needed to create a request with a path beginning with //
+        request = self.factory.get('////absolute-uri')
+        self.assertEqual(
+            request.build_absolute_uri(location='http://example.com/?foo=bar'),
+            'http://example.com/?foo=bar'
+        )
 
-        # The GET below will not succeed, but it will give a response with
-        # defined ._handler_class. That is needed for sending the
-        # request_finished signal.
-        response = self.client.get('/')
-        # Make sure there is an open connection
-        connection.ensure_connection()
-        connection.enter_transaction_management()
-        signals.request_finished.send(sender=response._handler_class)
-        self.assertEqual(len(connection.transaction_state), 0)
+    def test_build_absolute_uri_schema_relative_location(self):
+        """
+        Ensures that ``request.build_absolute_uri()`` returns the proper value
+        when a schema-relative URL ``location`` argument is provided, and
+        ``request.path`` begins with //.
+        """
+        # //// is needed to create a request with a path beginning with //
+        request = self.factory.get('////absolute-uri')
+        self.assertEqual(
+            request.build_absolute_uri(location='//example.com/?foo=bar'),
+            'http://example.com/?foo=bar'
+        )
 
-    def test_request_finished_failed_connection(self):
-        # Force closing connection on request end
-        connection.settings_dict['CONN_MAX_AGE'] = 0
-
-        connection.enter_transaction_management()
-        connection.set_dirty()
-
-        # Test that the rollback doesn't succeed (for example network failure
-        # could cause this).
-        def fail_horribly():
-            raise Exception("Horrible failure!")
-        connection._rollback = fail_horribly
-        try:
-            with self.assertRaises(Exception):
-                signals.request_finished.send(sender=self.__class__)
-            # The connection's state wasn't cleaned up
-            self.assertEqual(len(connection.transaction_state), 1)
-        finally:
-            del connection._rollback
-        # The connection will be cleaned on next request where the conn
-        # works again.
-        signals.request_finished.send(sender=self.__class__)
-        self.assertEqual(len(connection.transaction_state), 0)
+    def test_build_absolute_uri_relative_location(self):
+        """
+        Ensures that ``request.build_absolute_uri()`` returns the proper value
+        when a relative URL ``location`` argument is provided, and
+        ``request.path`` begins with //.
+        """
+        # //// is needed to create a request with a path beginning with //
+        request = self.factory.get('////absolute-uri')
+        self.assertEqual(
+            request.build_absolute_uri(location='/foo/bar/'),
+            'http://testserver/foo/bar/'
+        )

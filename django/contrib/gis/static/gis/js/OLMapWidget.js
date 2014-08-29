@@ -22,7 +22,7 @@ OpenLayers.Util.properFeatures = function(features, geom_type) {
 /**
  * Class: OpenLayers.Format.DjangoWKT
  * Class for reading Well-Known Text, with workarounds to successfully parse
- * geometries and collections as returnes by django.contrib.gis.geos.
+ * geometries and collections as returned by django.contrib.gis.geos.
  *
  * Inherits from:
  *  - <OpenLayers.Format.WKT>
@@ -190,7 +190,7 @@ function MapWidget(options) {
         scrollable: true
     };
 
-    // Altering using user-provied options
+    // Altering using user-provided options
     for (var property in options) {
         if (options.hasOwnProperty(property)) {
             this.options[property] = options[property];
@@ -202,7 +202,7 @@ function MapWidget(options) {
     var defaults_style = {
         'fillColor': '#' + this.options.color,
         'fillOpacity': this.options.opacity,
-        'strokeColor': '#' + this.options.color,
+        'strokeColor': '#' + this.options.color
     };
     if (this.options.geom_name == 'LineString') {
         defaults_style['strokeWidth'] = 3;
@@ -359,13 +359,13 @@ MapWidget.prototype.getControls = function(layer) {
     this.controls = [new OpenLayers.Control.Navigation()];
     if (!this.options.modifiable && layer.features.length)
         return;
-    if (this.options.geom_name.indexOf('LineString') >= 0 || this.options.geom_name == 'Unknown') {
+    if (this.options.geom_name.indexOf('LineString') >= 0 || this.options.geom_name == 'GeometryCollection' || this.options.geom_name == 'Unknown') {
         this.controls.push(new OpenLayers.Control.DrawFeature(layer, OpenLayers.Handler.Path, {'displayClass': 'olControlDrawFeaturePath'}));
     }
-    if (this.options.geom_name.indexOf('Polygon') >= 0 || this.options.geom_name == 'Unknown') {
+    if (this.options.geom_name.indexOf('Polygon') >= 0 || this.options.geom_name == 'GeometryCollection' || this.options.geom_name == 'Unknown') {
         this.controls.push(new OpenLayers.Control.DrawFeature(layer, OpenLayers.Handler.Polygon, {'displayClass': 'olControlDrawFeaturePolygon'}));
     }
-    if (this.options.geom_name.indexOf('Point') >= 0 || this.options.geom_name == 'Unknown') {
+    if (this.options.geom_name.indexOf('Point') >= 0 || this.options.geom_name == 'GeometryCollection' || this.options.geom_name == 'Unknown') {
         this.controls.push(new OpenLayers.Control.DrawFeature(layer, OpenLayers.Handler.Point, {'displayClass': 'olControlDrawFeaturePoint'}));
     }
     if (this.options.modifiable) {

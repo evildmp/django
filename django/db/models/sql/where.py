@@ -11,6 +11,7 @@ from django.conf import settings
 from django.db.models.fields import DateTimeField, Field
 from django.db.models.sql.datastructures import EmptyResultSet, Empty
 from django.db.models.sql.aggregates import Aggregate
+from django.utils.deprecation import RemovedInDjango19Warning
 from django.utils.six.moves import xrange
 from django.utils import timezone
 from django.utils import tree
@@ -65,7 +66,7 @@ class WhereNode(tree.Node):
             # emptiness and transform any non-empty values correctly.
             value = list(value)
 
-        # The "value_annotation" parameter is used to pass auxilliary information
+        # The "value_annotation" parameter is used to pass auxiliary information
         # about the value(s) to the query construction. Specifically, datetime
         # and empty values need special handling. Other types could be used
         # here in the future (using Python types is suggested for consistency).
@@ -177,7 +178,7 @@ class WhereNode(tree.Node):
         """
         warnings.warn(
             "The make_atom() method will be removed in Django 1.9. Use Lookup class instead.",
-            PendingDeprecationWarning)
+            RemovedInDjango19Warning)
         lvalue, lookup_type, value_annotation, params_or_value = child
         field_internal_type = lvalue.field.get_internal_type() if lvalue.field else None
 
@@ -355,7 +356,7 @@ class Constraint(object):
     def __init__(self, alias, col, field):
         warnings.warn(
             "The Constraint class will be removed in Django 1.9. Use Lookup class instead.",
-            PendingDeprecationWarning)
+            RemovedInDjango19Warning)
         self.alias, self.col, self.field = alias, col, field
 
     def prepare(self, lookup_type, value):
@@ -417,7 +418,9 @@ class SubqueryConstraint(object):
             else:
                 query = query._clone()
             query = query.query
-            query.clear_ordering(True)
+            if query.can_filter():
+                # If there is no slicing in use, then we can safely drop all ordering
+                query.clear_ordering(True)
 
         query_compiler = query.get_compiler(connection=connection)
         return query_compiler.as_subquery_condition(self.alias, self.columns, qn)

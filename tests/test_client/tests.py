@@ -1,4 +1,4 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 """
 39. Testing using the Test Client
 
@@ -29,10 +29,10 @@ from django.test import override_settings
 from .views import get_view
 
 
-@override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
+@override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',),
+                   ROOT_URLCONF='test_client.urls',)
 class ClientTest(TestCase):
     fixtures = ['testdata.json']
-    urls = 'test_client.urls'
 
     def test_get_view(self):
         "GET a view"
@@ -98,6 +98,29 @@ class ClientTest(TestCase):
         for key, value in response.request.items():
             self.assertIn(key, response.wsgi_request.environ)
             self.assertEqual(response.wsgi_request.environ[key], value)
+
+    def test_response_resolver_match(self):
+        """
+        The response contains a ResolverMatch instance.
+        """
+        response = self.client.get('/header_view/')
+        self.assertTrue(hasattr(response, 'resolver_match'))
+
+    def test_response_resolver_match_redirect_follow(self):
+        """
+        The response ResolverMatch instance contains the correct
+        information when following redirects.
+        """
+        response = self.client.get('/redirect_view/', follow=True)
+        self.assertEqual(response.resolver_match.url_name, 'get_view')
+
+    def test_response_resolver_match_regular_view(self):
+        """
+        The response ResolverMatch instance contains the correct
+        information when accessing a regular view.
+        """
+        response = self.client.get('/get_view/')
+        self.assertEqual(response.resolver_match.url_name, 'get_view')
 
     def test_raw_post(self):
         "POST raw data (with a content type) to a view"
@@ -405,7 +428,7 @@ class ClientTest(TestCase):
         # TODO: Log in with right permissions and request the page again
 
     def test_view_with_permissions_exception(self):
-        "Request a page that is protected with @permission_required but raises a exception"
+        "Request a page that is protected with @permission_required but raises an exception"
 
         # Get the page without logging in. Should result in 403.
         response = self.client.get('/permission_protected_view_exception/')
@@ -499,10 +522,10 @@ class ClientTest(TestCase):
 
 
 @override_settings(
-    MIDDLEWARE_CLASSES=('django.middleware.csrf.CsrfViewMiddleware',)
+    MIDDLEWARE_CLASSES=('django.middleware.csrf.CsrfViewMiddleware',),
+    ROOT_URLCONF='test_client.urls',
 )
 class CSRFEnabledClientTests(TestCase):
-    urls = 'test_client.urls'
 
     def test_csrf_enabled_client(self):
         "A client can be instantiated with CSRF checks enabled"
@@ -529,8 +552,8 @@ class CustomTestClientTest(TestCase):
         self.assertEqual(hasattr(self.client, "i_am_customized"), True)
 
 
+@override_settings(ROOT_URLCONF='test_client.urls')
 class RequestFactoryTest(TestCase):
-    urls = 'test_client.urls'
 
     def test_request_factory(self):
         factory = RequestFactory()

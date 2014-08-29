@@ -171,16 +171,21 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     has_select_for_update = True
     has_select_for_update_nowait = False
     supports_forward_references = False
-    supports_long_model_names = False
+    # XXX MySQL DB-API drivers currently fail on binary data on Python 3.
+    supports_binary_field = six.PY2
     supports_microsecond_precision = False
     supports_regex_backreferencing = False
     supports_date_lookup_using_string = False
+    can_introspect_binary_field = False
+    can_introspect_boolean_field = False
+    can_introspect_small_integer_field = True
     supports_timezones = False
     requires_explicit_null_ordering_when_grouping = True
     allows_auto_pk_0 = False
     uses_savepoints = True
+    can_release_savepoints = True
     atomic_transactions = False
-    supports_check_constraints = False
+    supports_column_check_constraints = False
 
     def __init__(self, connection):
         super(DatabaseFeatures, self).__init__(connection)
@@ -222,6 +227,12 @@ class DatabaseFeatures(BaseDatabaseFeatures):
 
 class DatabaseOperations(BaseDatabaseOperations):
     compiler_module = "django.db.backends.mysql.compiler"
+
+    # MySQL stores positive fields as UNSIGNED ints.
+    integer_field_ranges = dict(BaseDatabaseOperations.integer_field_ranges,
+        PositiveSmallIntegerField=(0, 4294967295),
+        PositiveIntegerField=(0, 18446744073709551615),
+    )
 
     def date_extract_sql(self, lookup_type, field_name):
         # http://dev.mysql.com/doc/mysql/en/date-and-time-functions.html
@@ -328,22 +339,6 @@ class DatabaseOperations(BaseDatabaseOperations):
             sql.append('SET FOREIGN_KEY_CHECKS = 1;')
             sql.extend(self.sequence_reset_by_name_sql(style, sequences))
             return sql
-        else:
-            return []
-
-    def sequence_reset_by_name_sql(self, style, sequences):
-        # Truncate already resets the AUTO_INCREMENT field from
-        # MySQL version 5.0.13 onwards. Refs #16961.
-        if self.connection.mysql_version < (5, 0, 13):
-            return [
-                "%s %s %s %s %s;" % (
-                    style.SQL_KEYWORD('ALTER'),
-                    style.SQL_KEYWORD('TABLE'),
-                    style.SQL_TABLE(self.quote_name(sequence['table'])),
-                    style.SQL_KEYWORD('AUTO_INCREMENT'),
-                    style.SQL_FIELD('= 1'),
-                ) for sequence in sequences
-            ]
         else:
             return []
 
@@ -482,7 +477,8 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             pass
 
     def _set_autocommit(self, autocommit):
-        self.connection.autocommit(autocommit)
+        with self.wrap_database_errors:
+            self.connection.autocommit(autocommit)
 
     def disable_constraint_checking(self):
         """
@@ -546,7 +542,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
     def is_usable(self):
         try:
             self.connection.ping()
-        except DatabaseError:
+        except Database.Error:
             return False
         else:
             return True

@@ -5,6 +5,7 @@ import sys
 import warnings
 
 from django.utils import six
+from django.utils.deprecation import RemovedInDjango19Warning
 from django.utils.six.moves import copyreg
 
 
@@ -27,7 +28,7 @@ def memoize(func, cache, num_args):
     """
     warnings.warn("memoize wrapper is deprecated and will be removed in "
                   "Django 1.9. Use django.utils.lru_cache instead.",
-                  PendingDeprecationWarning, stacklevel=2)
+                  RemovedInDjango19Warning, stacklevel=2)
 
     @wraps(func)
     def wrapper(*args):
@@ -44,14 +45,18 @@ class cached_property(object):
     """
     Decorator that converts a method with a single self argument into a
     property cached on the instance.
+
+    Optional ``name`` argument allows you to make cached properties of other
+    methods. (e.g.  url = cached_property(get_absolute_url, name='url') )
     """
-    def __init__(self, func):
+    def __init__(self, func, name=None):
         self.func = func
+        self.name = name or func.__name__
 
     def __get__(self, instance, type=None):
         if instance is None:
             return self
-        res = instance.__dict__[self.func.__name__] = self.func(instance)
+        res = instance.__dict__[self.name] = self.func(instance)
         return res
 
 
@@ -264,61 +269,6 @@ class LazyObject(object):
         """
         raise NotImplementedError('subclasses of LazyObject must provide a _setup() method')
 
-    # Introspection support
-    __dir__ = new_method_proxy(dir)
-
-    # Dictionary methods support
-    __getitem__ = new_method_proxy(operator.getitem)
-    __setitem__ = new_method_proxy(operator.setitem)
-    __delitem__ = new_method_proxy(operator.delitem)
-
-    __len__ = new_method_proxy(len)
-    __contains__ = new_method_proxy(operator.contains)
-
-
-# Workaround for http://bugs.python.org/issue12370
-_super = super
-
-
-class SimpleLazyObject(LazyObject):
-    """
-    A lazy object initialised from any function.
-
-    Designed for compound objects of unknown type. For builtins or objects of
-    known type, use django.utils.functional.lazy.
-    """
-    def __init__(self, func):
-        """
-        Pass in a callable that returns the object to be wrapped.
-
-        If copies are made of the resulting SimpleLazyObject, which can happen
-        in various circumstances within Django, then you must ensure that the
-        callable can be safely run more than once and will return the same
-        value.
-        """
-        self.__dict__['_setupfunc'] = func
-        _super(SimpleLazyObject, self).__init__()
-
-    def _setup(self):
-        self._wrapped = self._setupfunc()
-
-    if six.PY3:
-        __bytes__ = new_method_proxy(bytes)
-        __str__ = new_method_proxy(str)
-    else:
-        __str__ = new_method_proxy(str)
-        __unicode__ = new_method_proxy(unicode)
-
-    def __deepcopy__(self, memo):
-        if self._wrapped is empty:
-            # We have to use SimpleLazyObject, not self.__class__, because the
-            # latter is proxied.
-            result = SimpleLazyObject(self._setupfunc)
-            memo[id(self)] = result
-            return result
-        else:
-            return copy.deepcopy(self._wrapped, memo)
-
     # Because we have messed with __class__ below, we confuse pickle as to what
     # class we are pickling. It also appears to stop __reduce__ from being
     # called. So, we define __getstate__ in a way that cooperates with the way
@@ -347,14 +297,26 @@ class SimpleLazyObject(LazyObject):
             # all.
             return (copyreg._reconstructor, (self.__class__, object, None), self.__getstate__())
 
-    # Return a meaningful representation of the lazy object for debugging
-    # without evaluating the wrapped object.
-    def __repr__(self):
+    def __deepcopy__(self, memo):
         if self._wrapped is empty:
-            repr_attr = self._setupfunc
-        else:
-            repr_attr = self._wrapped
-        return '<SimpleLazyObject: %r>' % repr_attr
+            # We have to use type(self), not self.__class__, because the
+            # latter is proxied.
+            result = type(self)()
+            memo[id(self)] = result
+            return result
+        return copy.deepcopy(self._wrapped, memo)
+
+    if six.PY3:
+        __bytes__ = new_method_proxy(bytes)
+        __str__ = new_method_proxy(str)
+        __bool__ = new_method_proxy(bool)
+    else:
+        __str__ = new_method_proxy(str)
+        __unicode__ = new_method_proxy(unicode)
+        __nonzero__ = new_method_proxy(bool)
+
+    # Introspection support
+    __dir__ = new_method_proxy(dir)
 
     # Need to pretend to be the wrapped class, for the sake of objects that
     # care about this (especially in equality tests)
@@ -362,8 +324,59 @@ class SimpleLazyObject(LazyObject):
     __eq__ = new_method_proxy(operator.eq)
     __ne__ = new_method_proxy(operator.ne)
     __hash__ = new_method_proxy(hash)
-    __bool__ = new_method_proxy(bool)       # Python 3
-    __nonzero__ = __bool__                  # Python 2
+
+    # Dictionary methods support
+    __getitem__ = new_method_proxy(operator.getitem)
+    __setitem__ = new_method_proxy(operator.setitem)
+    __delitem__ = new_method_proxy(operator.delitem)
+
+    __len__ = new_method_proxy(len)
+    __contains__ = new_method_proxy(operator.contains)
+
+
+# Workaround for http://bugs.python.org/issue12370
+_super = super
+
+
+class SimpleLazyObject(LazyObject):
+    """
+    A lazy object initialized from any function.
+
+    Designed for compound objects of unknown type. For builtins or objects of
+    known type, use django.utils.functional.lazy.
+    """
+    def __init__(self, func):
+        """
+        Pass in a callable that returns the object to be wrapped.
+
+        If copies are made of the resulting SimpleLazyObject, which can happen
+        in various circumstances within Django, then you must ensure that the
+        callable can be safely run more than once and will return the same
+        value.
+        """
+        self.__dict__['_setupfunc'] = func
+        _super(SimpleLazyObject, self).__init__()
+
+    def _setup(self):
+        self._wrapped = self._setupfunc()
+
+    # Return a meaningful representation of the lazy object for debugging
+    # without evaluating the wrapped object.
+    def __repr__(self):
+        if self._wrapped is empty:
+            repr_attr = self._setupfunc
+        else:
+            repr_attr = self._wrapped
+        return '<%s: %r>' % (type(self).__name__, repr_attr)
+
+    def __deepcopy__(self, memo):
+        if self._wrapped is empty:
+            # We have to use SimpleLazyObject, not self.__class__, because the
+            # latter is proxied.
+            result = SimpleLazyObject(self._setupfunc)
+            memo[id(self)] = result
+            return result
+        return copy.deepcopy(self._wrapped, memo)
 
 
 class lazy_property(property):

@@ -1,3 +1,7 @@
+from __future__ import unicode_literals
+from django.db.transaction import atomic
+
+
 class Migration(object):
     """
     The base class for all migrations.
@@ -12,7 +16,7 @@ class Migration(object):
      - replaces: A list of migration_names
 
     Note that all migrations come out of migrations and into the Loader or
-    Graph as instances, having been initialised with their app label and name.
+    Graph as instances, having been initialized with their app label and name.
     """
 
     # Operations to apply during this migration, in order.
@@ -94,7 +98,13 @@ class Migration(object):
             new_state = project_state.clone()
             operation.state_forwards(self.app_label, new_state)
             # Run the operation
-            operation.database_forwards(self.app_label, schema_editor, project_state, new_state)
+            if not schema_editor.connection.features.can_rollback_ddl and operation.atomic:
+                # We're forcing a transaction on a non-transactional-DDL backend
+                with atomic(schema_editor.connection.alias):
+                    operation.database_forwards(self.app_label, schema_editor, project_state, new_state)
+            else:
+                # Normal behaviour
+                operation.database_forwards(self.app_label, schema_editor, project_state, new_state)
             # Switch states
             project_state = new_state
         return project_state
@@ -126,11 +136,30 @@ class Migration(object):
         # Now run them in reverse
         to_run.reverse()
         for operation, to_state, from_state in to_run:
-            operation.database_backwards(self.app_label, schema_editor, from_state, to_state)
+            if not schema_editor.connection.features.can_rollback_ddl and operation.atomic:
+                # We're forcing a transaction on a non-transactional-DDL backend
+                with atomic(schema_editor.connection.alias):
+                    operation.database_backwards(self.app_label, schema_editor, from_state, to_state)
+            else:
+                # Normal behaviour
+                operation.database_backwards(self.app_label, schema_editor, from_state, to_state)
+        return project_state
+
+
+class SwappableTuple(tuple):
+    """
+    Subclass of tuple so Django can tell this was originally a swappable
+    dependency when it reads the migration file.
+    """
+
+    def __new__(cls, value, setting):
+        self = tuple.__new__(cls, value)
+        self.setting = setting
+        return self
 
 
 def swappable_dependency(value):
     """
     Turns a setting value into a dependency.
     """
-    return (value.split(".", 1)[0], "__first__")
+    return SwappableTuple((value.split(".", 1)[0], "__first__"), value)

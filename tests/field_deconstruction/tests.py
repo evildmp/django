@@ -1,6 +1,8 @@
 import warnings
-from django.test import TestCase, override_settings
+
 from django.db import models
+from django.test import TestCase, override_settings
+from django.utils import six
 
 
 class FieldDeconstructionTests(TestCase):
@@ -15,14 +17,15 @@ class FieldDeconstructionTests(TestCase):
         # First try using a "normal" field
         field = models.CharField(max_length=65)
         name, path, args, kwargs = field.deconstruct()
-        self.assertEqual(name, None)
+        self.assertIsNone(name)
         field.set_attributes_from_name("is_awesome_test")
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(name, "is_awesome_test")
+        self.assertIsInstance(name, six.text_type)
         # Now try with a ForeignKey
         field = models.ForeignKey("some_fake.ModelName")
         name, path, args, kwargs = field.deconstruct()
-        self.assertEqual(name, None)
+        self.assertIsNone(name)
         field.set_attributes_from_name("author")
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(name, "author")
@@ -110,12 +113,22 @@ class FieldDeconstructionTests(TestCase):
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {"max_digits": 5, "decimal_places": 2})
 
+    def test_decimal_field_0_decimal_places(self):
+        """
+        A DecimalField with decimal_places=0 should work (#22272).
+        """
+        field = models.DecimalField(max_digits=5, decimal_places=0)
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.DecimalField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"max_digits": 5, "decimal_places": 0})
+
     def test_email_field(self):
         field = models.EmailField()
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(path, "django.db.models.EmailField")
         self.assertEqual(args, [])
-        self.assertEqual(kwargs, {"max_length": 75})
+        self.assertEqual(kwargs, {"max_length": 254})
         field = models.EmailField(max_length=255)
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(path, "django.db.models.EmailField")
@@ -128,6 +141,12 @@ class FieldDeconstructionTests(TestCase):
         self.assertEqual(path, "django.db.models.FileField")
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {"upload_to": "foo/bar"})
+        # Test max_length
+        field = models.FileField(upload_to="foo/bar", max_length=200)
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.FileField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"upload_to": "foo/bar", "max_length": 200})
 
     def test_file_path_field(self):
         field = models.FilePathField(match=".*\.txt$")
@@ -135,11 +154,11 @@ class FieldDeconstructionTests(TestCase):
         self.assertEqual(path, "django.db.models.FilePathField")
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {"match": ".*\.txt$"})
-        field = models.FilePathField(recursive=True, allow_folders=True)
+        field = models.FilePathField(recursive=True, allow_folders=True, max_length=123)
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(path, "django.db.models.FilePathField")
         self.assertEqual(args, [])
-        self.assertEqual(kwargs, {"recursive": True, "allow_folders": True})
+        self.assertEqual(kwargs, {"recursive": True, "allow_folders": True, "max_length": 123})
 
     def test_float_field(self):
         field = models.FloatField()
@@ -150,7 +169,10 @@ class FieldDeconstructionTests(TestCase):
 
     def test_foreign_key(self):
         # Test basic pointing
+        from django.contrib.auth.models import Permission
         field = models.ForeignKey("auth.Permission")
+        field.rel.to = Permission
+        field.rel.field_name = "id"
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(path, "django.db.models.ForeignKey")
         self.assertEqual(args, [])
@@ -175,6 +197,18 @@ class FieldDeconstructionTests(TestCase):
         self.assertEqual(path, "django.db.models.ForeignKey")
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {"to": "auth.User", "on_delete": models.SET_NULL})
+        # Test to_field preservation
+        field = models.ForeignKey("auth.Permission", to_field="foobar")
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.ForeignKey")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"to": "auth.Permission", "to_field": "foobar"})
+        # Test related_name preservation
+        field = models.ForeignKey("auth.Permission", related_name="foobar")
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.ForeignKey")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"to": "auth.Permission", "related_name": "foobar"})
 
     @override_settings(AUTH_USER_MODEL="auth.Permission")
     def test_foreign_key_swapped(self):
@@ -237,6 +271,24 @@ class FieldDeconstructionTests(TestCase):
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {"to": "auth.User"})
         self.assertEqual(kwargs['to'].setting_name, "AUTH_USER_MODEL")
+        # Test through
+        field = models.ManyToManyField("auth.Permission", through="auth.Group")
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.ManyToManyField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"to": "auth.Permission", "through": "auth.Group"})
+        # Test custom db_table
+        field = models.ManyToManyField("auth.Permission", db_table="custom_table")
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.ManyToManyField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"to": "auth.Permission", "db_table": "custom_table"})
+        # Test related_name
+        field = models.ManyToManyField("auth.Permission", related_name="custom_table")
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.ManyToManyField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"to": "auth.Permission", "related_name": "custom_table"})
 
     @override_settings(AUTH_USER_MODEL="auth.Permission")
     def test_many_to_many_field_swapped(self):
@@ -276,11 +328,11 @@ class FieldDeconstructionTests(TestCase):
         self.assertEqual(path, "django.db.models.SlugField")
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {})
-        field = models.SlugField(db_index=False)
+        field = models.SlugField(db_index=False, max_length=231)
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(path, "django.db.models.SlugField")
         self.assertEqual(args, [])
-        self.assertEqual(kwargs, {"db_index": False})
+        self.assertEqual(kwargs, {"db_index": False, "max_length": 231})
 
     def test_small_integer_field(self):
         field = models.SmallIntegerField()
@@ -296,9 +348,38 @@ class FieldDeconstructionTests(TestCase):
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {})
 
+    def test_time_field(self):
+        field = models.TimeField()
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.TimeField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {})
+
+        field = models.TimeField(auto_now=True)
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {'auto_now': True})
+
+        field = models.TimeField(auto_now_add=True)
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {'auto_now_add': True})
+
     def test_url_field(self):
         field = models.URLField()
         name, path, args, kwargs = field.deconstruct()
         self.assertEqual(path, "django.db.models.URLField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {})
+        field = models.URLField(max_length=231)
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.URLField")
+        self.assertEqual(args, [])
+        self.assertEqual(kwargs, {"max_length": 231})
+
+    def test_binary_field(self):
+        field = models.BinaryField()
+        name, path, args, kwargs = field.deconstruct()
+        self.assertEqual(path, "django.db.models.BinaryField")
         self.assertEqual(args, [])
         self.assertEqual(kwargs, {})

@@ -2,6 +2,7 @@ import warnings
 
 from django.template import Library
 from django.template import defaulttags
+from django.utils.deprecation import RemovedInDjango19Warning, RemovedInDjango20Warning
 
 register = Library()
 
@@ -11,7 +12,7 @@ def ssi(parser, token):
     warnings.warn(
         "Loading the `ssi` tag from the `future` library is deprecated and "
         "will be removed in Django 1.9. Use the default `ssi` tag instead.",
-        PendingDeprecationWarning)
+        RemovedInDjango19Warning)
     return defaulttags.ssi(parser, token)
 
 
@@ -20,7 +21,7 @@ def url(parser, token):
     warnings.warn(
         "Loading the `url` tag from the `future` library is deprecated and "
         "will be removed in Django 1.9. Use the default `url` tag instead.",
-        PendingDeprecationWarning)
+        RemovedInDjango19Warning)
     return defaulttags.url(parser, token)
 
 
@@ -28,6 +29,8 @@ def url(parser, token):
 def cycle(parser, token):
     """
     This is the future version of `cycle` with auto-escaping.
+    The deprecation is now complete and this version is no different
+    from the non-future version so this is deprecated.
 
     By default all strings are escaped.
 
@@ -41,13 +44,19 @@ def cycle(parser, token):
 
         {% cycle var1 var2|safe var3|safe  as somecycle %}
     """
-    return defaulttags.cycle(parser, token, escape=True)
+    warnings.warn(
+        "Loading the `cycle` tag from the `future` library is deprecated and "
+        "will be removed in Django 2.0. Use the default `cycle` tag instead.",
+        RemovedInDjango20Warning)
+    return defaulttags.cycle(parser, token)
 
 
 @register.tag
 def firstof(parser, token):
     """
     This is the future version of `firstof` with auto-escaping.
+    The deprecation is now complete and this version is no different
+    from the non-future version so this is deprecated.
 
     This is equivalent to::
 
@@ -70,4 +79,8 @@ def firstof(parser, token):
         {% firstof var1 var2|safe var3 "<strong>fallback value</strong>"|safe %}
 
     """
-    return defaulttags.firstof(parser, token, escape=True)
+    warnings.warn(
+        "Loading the `firstof` tag from the `future` library is deprecated and "
+        "will be removed in Django 2.0. Use the default `firstof` tag instead.",
+        RemovedInDjango20Warning)
+    return defaulttags.firstof(parser, token)

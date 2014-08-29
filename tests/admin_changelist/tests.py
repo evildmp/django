@@ -26,8 +26,8 @@ from .models import (Event, Child, Parent, Genre, Band, Musician, Group,
     UnorderedObject, OrderedObject, CustomIdUser)
 
 
+@override_settings(ROOT_URLCONF="admin_changelist.urls")
 class ChangeListTests(TestCase):
-    urls = "admin_changelist.urls"
 
     def setUp(self):
         self.factory = RequestFactory()
@@ -191,7 +191,7 @@ class ChangeListTests(TestCase):
     def test_distinct_for_m2m_in_list_filter(self):
         """
         Regression test for #13902: When using a ManyToMany in list_filter,
-        results shouldn't apper more than once. Basic ManyToMany.
+        results shouldn't appear more than once. Basic ManyToMany.
         """
         blues = Genre.objects.create(name='Blues')
         band = Band.objects.create(name='B.B. King Review', nr_of_members=11)
@@ -215,7 +215,7 @@ class ChangeListTests(TestCase):
     def test_distinct_for_through_m2m_in_list_filter(self):
         """
         Regression test for #13902: When using a ManyToMany in list_filter,
-        results shouldn't apper more than once. With an intermediate model.
+        results shouldn't appear more than once. With an intermediate model.
         """
         lead = Musician.objects.create(name='Vox')
         band = Group.objects.create(name='The Hype')
@@ -238,7 +238,7 @@ class ChangeListTests(TestCase):
     def test_distinct_for_inherited_m2m_in_list_filter(self):
         """
         Regression test for #13902: When using a ManyToMany in list_filter,
-        results shouldn't apper more than once. Model managed in the
+        results shouldn't appear more than once. Model managed in the
         admin inherits from the one that defins the relationship.
         """
         lead = Musician.objects.create(name='John')
@@ -262,7 +262,7 @@ class ChangeListTests(TestCase):
     def test_distinct_for_m2m_to_inherited_in_list_filter(self):
         """
         Regression test for #13902: When using a ManyToMany in list_filter,
-        results shouldn't apper more than once. Target of the relationship
+        results shouldn't appear more than once. Target of the relationship
         inherits from another.
         """
         lead = ChordsMusician.objects.create(name='Player A')
@@ -664,12 +664,12 @@ class AdminLogNodeTestCase(TestCase):
         self.assertEqual(template.render(context), '')
 
 
-@override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
+@override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',),
+                   ROOT_URLCONF="admin_changelist.urls")
 class SeleniumFirefoxTests(AdminSeleniumWebDriverTestCase):
 
     available_apps = ['admin_changelist'] + AdminSeleniumWebDriverTestCase.available_apps
     fixtures = ['users.json']
-    urls = "admin_changelist.urls"
     webdriver_class = 'selenium.webdriver.firefox.webdriver.WebDriver'
 
     def test_add_row_selection(self):

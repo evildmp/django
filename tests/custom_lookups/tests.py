@@ -3,10 +3,11 @@ from __future__ import unicode_literals
 from datetime import date
 import unittest
 
-from django.test import TestCase
-from .models import Author
+from django.core.exceptions import FieldError
 from django.db import models
 from django.db import connection
+from django.test import TestCase
+from .models import Author
 
 
 class Div3Lookup(models.Lookup):
@@ -45,7 +46,7 @@ class YearTransform(models.Transform):
         return connection.ops.date_extract_sql('year', lhs_sql), params
 
     @property
-    def output_type(self):
+    def output_field(self):
         return models.IntegerField()
 
 
@@ -86,6 +87,47 @@ class YearLte(models.lookups.LessThanOrEqual):
         # but also make it work if the rhs_sql is field reference.
         return "%s <= (%s || '-12-31')::date" % (lhs_sql, rhs_sql), params
 YearTransform.register_lookup(YearLte)
+
+
+class SQLFunc(models.Lookup):
+    def __init__(self, name, *args, **kwargs):
+        super(SQLFunc, self).__init__(*args, **kwargs)
+        self.name = name
+
+    def as_sql(self, qn, connection):
+        return '%s()', [self.name]
+
+    @property
+    def output_field(self):
+        return CustomField()
+
+
+class SQLFuncFactory(object):
+
+    def __init__(self, name):
+        self.name = name
+
+    def __call__(self, *args, **kwargs):
+        return SQLFunc(self.name, *args, **kwargs)
+
+
+class CustomField(models.TextField):
+
+    def get_lookup(self, lookup_name):
+        if lookup_name.startswith('lookupfunc_'):
+            key, name = lookup_name.split('_', 1)
+            return SQLFuncFactory(name)
+        return super(CustomField, self).get_lookup(lookup_name)
+
+    def get_transform(self, lookup_name):
+        if lookup_name.startswith('transformfunc_'):
+            key, name = lookup_name.split('_', 1)
+            return SQLFuncFactory(name)
+        return super(CustomField, self).get_transform(lookup_name)
+
+
+class CustomModel(models.Model):
+    field = CustomField()
 
 
 # We will register this class temporarily in the test method.
@@ -289,3 +331,73 @@ class YearLteTests(TestCase):
         finally:
             YearTransform._unregister_lookup(CustomYearExact)
             YearTransform.register_lookup(YearExact)
+
+
+class TrackCallsYearTransform(YearTransform):
+    lookup_name = 'year'
+    call_order = []
+
+    def as_sql(self, qn, connection):
+        lhs_sql, params = qn.compile(self.lhs)
+        return connection.ops.date_extract_sql('year', lhs_sql), params
+
+    @property
+    def output_field(self):
+        return models.IntegerField()
+
+    def get_lookup(self, lookup_name):
+        self.call_order.append('lookup')
+        return super(TrackCallsYearTransform, self).get_lookup(lookup_name)
+
+    def get_transform(self, lookup_name):
+        self.call_order.append('transform')
+        return super(TrackCallsYearTransform, self).get_transform(lookup_name)
+
+
+class LookupTransformCallOrderTests(TestCase):
+    def test_call_order(self):
+        models.DateField.register_lookup(TrackCallsYearTransform)
+        try:
+            # junk lookup - tries lookup, then transform, then fails
+            with self.assertRaises(FieldError):
+                Author.objects.filter(birthdate__year__junk=2012)
+            self.assertEqual(TrackCallsYearTransform.call_order,
+                             ['lookup', 'transform'])
+            TrackCallsYearTransform.call_order = []
+            # junk transform - tries transform only, then fails
+            with self.assertRaises(FieldError):
+                Author.objects.filter(birthdate__year__junk__more_junk=2012)
+            self.assertEqual(TrackCallsYearTransform.call_order,
+                             ['transform'])
+            TrackCallsYearTransform.call_order = []
+            # Just getting the year (implied __exact) - lookup only
+            Author.objects.filter(birthdate__year=2012)
+            self.assertEqual(TrackCallsYearTransform.call_order,
+                             ['lookup'])
+            TrackCallsYearTransform.call_order = []
+            # Just getting the year (explicit __exact) - lookup only
+            Author.objects.filter(birthdate__year__exact=2012)
+            self.assertEqual(TrackCallsYearTransform.call_order,
+                             ['lookup'])
+
+        finally:
+            models.DateField._unregister_lookup(TrackCallsYearTransform)
+
+
+class CustomisedMethodsTests(TestCase):
+
+    def test_overridden_get_lookup(self):
+        q = CustomModel.objects.filter(field__lookupfunc_monkeys=3)
+        self.assertIn('monkeys()', str(q.query))
+
+    def test_overridden_get_transform(self):
+        q = CustomModel.objects.filter(field__transformfunc_banana=3)
+        self.assertIn('banana()', str(q.query))
+
+    def test_overridden_get_lookup_chain(self):
+        q = CustomModel.objects.filter(field__transformfunc_banana__lookupfunc_elephants=3)
+        self.assertIn('elephants()', str(q.query))
+
+    def test_overridden_get_transform_chain(self):
+        q = CustomModel.objects.filter(field__transformfunc_banana__transformfunc_pear=3)
+        self.assertIn('pear()', str(q.query))

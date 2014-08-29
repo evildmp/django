@@ -1,16 +1,21 @@
+import argparse
 import warnings
 
 from django.core.management.base import BaseCommand
+from django.utils.deprecation import RemovedInDjango19Warning
 
 
 class Command(BaseCommand):
     help = "Runs this project as a FastCGI application. Requires flup."
-    args = '[various KEY=val options, use `runfcgi help` for help]'
+
+    def add_arguments(self, parser):
+        parser.add_argument('args', nargs=argparse.REMAINDER,
+            help='Various KEY=val options.')
 
     def handle(self, *args, **options):
         warnings.warn(
             "FastCGI support has been deprecated and will be removed in Django 1.9.",
-            PendingDeprecationWarning)
+            RemovedInDjango19Warning)
 
         from django.conf import settings
         from django.utils import translation

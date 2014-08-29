@@ -24,6 +24,22 @@ class AuthorWithM2M(models.Model):
         apps = new_apps
 
 
+class AuthorWithM2MThrough(models.Model):
+    name = models.CharField(max_length=255)
+    tags = models.ManyToManyField("schema.TagM2MTest", related_name="authors", through="AuthorTag")
+
+    class Meta:
+        apps = new_apps
+
+
+class AuthorTag(models.Model):
+    author = models.ForeignKey("schema.AuthorWithM2MThrough")
+    tag = models.ForeignKey("schema.TagM2MTest")
+
+    class Meta:
+        apps = new_apps
+
+
 class Book(models.Model):
     author = models.ForeignKey(Author)
     title = models.CharField(max_length=100, db_index=True)
@@ -34,11 +50,35 @@ class Book(models.Model):
         apps = new_apps
 
 
+class BookWeak(models.Model):
+    author = models.ForeignKey(Author, db_constraint=False)
+    title = models.CharField(max_length=100, db_index=True)
+    pub_date = models.DateTimeField()
+
+    class Meta:
+        apps = new_apps
+
+
 class BookWithM2M(models.Model):
     author = models.ForeignKey(Author)
     title = models.CharField(max_length=100, db_index=True)
     pub_date = models.DateTimeField()
     tags = models.ManyToManyField("TagM2MTest", related_name="books")
+
+    class Meta:
+        apps = new_apps
+
+
+class TagThrough(models.Model):
+    book = models.ForeignKey("schema.BookWithM2MThrough")
+    tag = models.ForeignKey("schema.TagM2MTest")
+
+    class Meta:
+        apps = new_apps
+
+
+class BookWithM2MThrough(models.Model):
+    tags = models.ManyToManyField("TagM2MTest", related_name="books", through=TagThrough)
 
     class Meta:
         apps = new_apps
@@ -98,8 +138,16 @@ class UniqueTest(models.Model):
         unique_together = ["year", "slug"]
 
 
+class AuthorWithEvenLongerName(models.Model):
+    name = models.CharField(max_length=255)
+    height = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        apps = new_apps
+
+
 class BookWithLongName(models.Model):
-    author_foreign_key_with_really_long_field_name = models.ForeignKey(Author)
+    author_foreign_key_with_really_long_field_name = models.ForeignKey(AuthorWithEvenLongerName)
 
     class Meta:
         apps = new_apps

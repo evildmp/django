@@ -196,7 +196,7 @@ class OracleOperations(DatabaseOperations, BaseSpatialOperations):
         else:
             dist_param = value
 
-        # dwithin lookups on oracle require a special string parameter
+        # dwithin lookups on Oracle require a special string parameter
         # that starts with "distance=".
         if lookup_type == 'dwithin':
             dist_param = 'distance=%s' % dist_param
@@ -220,7 +220,7 @@ class OracleOperations(DatabaseOperations, BaseSpatialOperations):
                 placeholder = '%s(%%s, %s)' % (self.transform, f.srid)
             else:
                 placeholder = '%s'
-            # No geometry value used for F expression, substitue in
+            # No geometry value used for F expression, substitute in
             # the column name instead.
             return placeholder % self.get_expression_column(value)
         else:
@@ -233,7 +233,7 @@ class OracleOperations(DatabaseOperations, BaseSpatialOperations):
         "Returns the SQL WHERE clause for use in Oracle spatial SQL construction."
         geo_col, db_type = lvalue
 
-        # See if a Oracle Geometry function matches the lookup type next
+        # See if an Oracle Geometry function matches the lookup type next
         lookup_info = self.geometry_functions.get(lookup_type, False)
         if lookup_info:
             # Lookup types that are tuples take tuple arguments, e.g., 'relate' and
@@ -289,12 +289,12 @@ class OracleOperations(DatabaseOperations, BaseSpatialOperations):
 
     # Routines for getting the OGC-compliant models.
     def geometry_columns(self):
-        from django.contrib.gis.db.backends.oracle.models import GeometryColumns
-        return GeometryColumns
+        from django.contrib.gis.db.backends.oracle.models import OracleGeometryColumns
+        return OracleGeometryColumns
 
     def spatial_ref_sys(self):
-        from django.contrib.gis.db.backends.oracle.models import SpatialRefSys
-        return SpatialRefSys
+        from django.contrib.gis.db.backends.oracle.models import OracleSpatialRefSys
+        return OracleSpatialRefSys
 
     def modify_insert_params(self, placeholders, params):
         """Drop out insert parameters for NULL placeholder. Needed for Oracle Spatial

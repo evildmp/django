@@ -17,7 +17,9 @@ from django.template.base import (Node, NodeList, Template, Context, Library,
     render_value_in_context)
 from django.template.smartif import IfParser, Literal
 from django.template.defaultfilters import date
+from django.utils.deprecation import RemovedInDjango20Warning
 from django.utils.encoding import force_text, smart_text
+from django.utils.lorem_ipsum import words, paragraphs
 from django.utils.safestring import mark_safe
 from django.utils.html import format_html
 from django.utils import six
@@ -64,11 +66,10 @@ class CsrfTokenNode(Node):
 
 
 class CycleNode(Node):
-    def __init__(self, cyclevars, variable_name=None, silent=False, escape=False):
+    def __init__(self, cyclevars, variable_name=None, silent=False):
         self.cyclevars = cyclevars
         self.variable_name = variable_name
         self.silent = silent
-        self.escape = escape        # only while the "future" version exists
 
     def render(self, context):
         if self not in context.render_context:
@@ -80,15 +81,13 @@ class CycleNode(Node):
             context[self.variable_name] = value
         if self.silent:
             return ''
-        if not self.escape:
-            value = mark_safe(value)
         return render_value_in_context(value, context)
 
 
 class DebugNode(Node):
     def render(self, context):
         from pprint import pformat
-        output = [pformat(val) for val in context]
+        output = [force_text(pformat(val)) for val in context]
         output.append('\n\n')
         output.append(pformat(sys.modules))
         return ''.join(output)
@@ -106,16 +105,13 @@ class FilterNode(Node):
 
 
 class FirstOfNode(Node):
-    def __init__(self, variables, escape=False):
+    def __init__(self, variables):
         self.vars = variables
-        self.escape = escape        # only while the "future" version exists
 
     def render(self, context):
         for var in self.vars:
             value = var.resolve(context, True)
             if value:
-                if not self.escape:
-                    value = mark_safe(value)
                 return render_value_in_context(value, context)
         return ''
 
@@ -164,7 +160,8 @@ class ForNode(Node):
             nodelist = []
             if self.is_reversed:
                 values = reversed(values)
-            unpack = len(self.loopvars) > 1
+            num_loopvars = len(self.loopvars)
+            unpack = num_loopvars > 1
             # Create a forloop value in the context.  We'll update counters on each
             # iteration just below.
             loop_dict = context['forloop'] = {'parentloop': parentloop}
@@ -183,6 +180,21 @@ class ForNode(Node):
                 if unpack:
                     # If there are multiple loop variables, unpack the item into
                     # them.
+
+                    # To complete this deprecation, remove from here to the
+                    # try/except block as well as the try/except itself,
+                    # leaving `unpacked_vars = ...` and the "else" statements.
+                    if not isinstance(item, (list, tuple)):
+                        len_item = 1
+                    else:
+                        len_item = len(item)
+                    # Check loop variable count before unpacking
+                    if num_loopvars != len_item:
+                        warnings.warn(
+                            "Need {0} values to unpack in for loop; got {1}. "
+                            "This will raise an exception in Django 2.0."
+                            .format(num_loopvars, len_item),
+                            RemovedInDjango20Warning)
                     try:
                         unpacked_vars = dict(zip(self.loopvars, item))
                     except TypeError:
@@ -313,6 +325,24 @@ class IfNode(Node):
         return ''
 
 
+class LoremNode(Node):
+    def __init__(self, count, method, common):
+        self.count, self.method, self.common = count, method, common
+
+    def render(self, context):
+        try:
+            count = int(self.count.resolve(context))
+        except (ValueError, TypeError):
+            count = 1
+        if self.method == 'w':
+            return words(count, common=self.common)
+        else:
+            paras = paragraphs(count, common=self.common)
+        if self.method == 'p':
+            paras = ['<p>%s</p>' % p for p in paras]
+        return '\n\n'.join(paras)
+
+
 class RegroupNode(Node):
     def __init__(self, target, expression, var_name):
         self.target, self.expression = target, expression
@@ -434,10 +464,6 @@ class URLNode(Node):
 
         view_name = self.view_name.resolve(context)
 
-        if not view_name:
-            raise NoReverseMatch("'url' requires a non-empty first argument. "
-                "The syntax changed in Django 1.5, see the docs.")
-
         # Try to look up the URL twice: once given the view name, and again
         # relative to what we guess is the "main" app. If they both fail,
         # re-raise the NoReverseMatch unless we're using the
@@ -557,7 +583,7 @@ def comment(parser, token):
 
 
 @register.tag
-def cycle(parser, token, escape=False):
+def cycle(parser, token):
     """
     Cycles among the given strings each time this tag is encountered.
 
@@ -571,7 +597,7 @@ def cycle(parser, token, escape=False):
         {% endfor %}
 
     Outside of a loop, give the values a unique name the first time you call
-    it, then use that name each sucessive time through::
+    it, then use that name each successive time through::
 
             <tr class="{% cycle 'row1' 'row2' 'row3' as rowcolors %}">...</tr>
             <tr class="{% cycle rowcolors %}">...</tr>
@@ -590,13 +616,6 @@ def cycle(parser, token, escape=False):
         {% endfor %}
 
     """
-    if not escape:
-        warnings.warn(
-            "'The `cycle` template tag is changing to escape its arguments; "
-            "the non-autoescaping version is deprecated. Load it "
-            "from the `future` tag library to start using the new behavior.",
-            DeprecationWarning, stacklevel=2)
-
     # Note: This returns the exact same node on each {% cycle name %} call;
     # that is, the node object returned from {% cycle a b c as name %} and the
     # one returned from {% cycle name %} are the exact same object. This
@@ -622,7 +641,7 @@ def cycle(parser, token, escape=False):
         name = args[1]
         if not hasattr(parser, '_namedCycleNodes'):
             raise TemplateSyntaxError("No named cycles in template. '%s' is not defined" % name)
-        if not name in parser._namedCycleNodes:
+        if name not in parser._namedCycleNodes:
             raise TemplateSyntaxError("Named cycle '%s' does not exist" % name)
         return parser._namedCycleNodes[name]
 
@@ -643,13 +662,13 @@ def cycle(parser, token, escape=False):
     if as_form:
         name = args[-1]
         values = [parser.compile_filter(arg) for arg in args[1:-2]]
-        node = CycleNode(values, name, silent=silent, escape=escape)
+        node = CycleNode(values, name, silent=silent)
         if not hasattr(parser, '_namedCycleNodes'):
             parser._namedCycleNodes = {}
         parser._namedCycleNodes[name] = node
     else:
         values = [parser.compile_filter(arg) for arg in args[1:]]
-        node = CycleNode(values, escape=escape)
+        node = CycleNode(values)
     return node
 
 
@@ -704,7 +723,7 @@ def do_filter(parser, token):
 
 
 @register.tag
-def firstof(parser, token, escape=False):
+def firstof(parser, token):
     """
     Outputs the first variable passed that is not False, without escaping.
 
@@ -738,17 +757,10 @@ def firstof(parser, token, escape=False):
         {% endfilter %}
 
     """
-    if not escape:
-        warnings.warn(
-            "'The `firstof` template tag is changing to escape its arguments; "
-            "the non-autoescaping version is deprecated. Load it "
-            "from the `future` tag library to start using the new behavior.",
-            DeprecationWarning, stacklevel=2)
-
     bits = token.split_contents()[1:]
     if len(bits) < 1:
         raise TemplateSyntaxError("'firstof' statement requires at least one argument")
-    return FirstOfNode([parser.compile_filter(bit) for bit in bits], escape=escape)
+    return FirstOfNode([parser.compile_filter(bit) for bit in bits])
 
 
 @register.tag('for')
@@ -948,7 +960,7 @@ def do_if(parser, token):
         {% endif %}
 
         {% if athlete_list and coach_list %}
-            Both atheletes and coaches are available.
+            Both athletes and coaches are available.
         {% endif %}
 
         {% if not athlete_list or coach_list %}
@@ -1121,6 +1133,53 @@ def load(parser, token):
                 raise TemplateSyntaxError("'%s' is not a valid tag library: %s" %
                                           (taglib, e))
     return LoadNode()
+
+
+@register.tag
+def lorem(parser, token):
+    """
+    Creates random Latin text useful for providing test data in templates.
+
+    Usage format::
+
+        {% lorem [count] [method] [random] %}
+
+    ``count`` is a number (or variable) containing the number of paragraphs or
+    words to generate (default is 1).
+
+    ``method`` is either ``w`` for words, ``p`` for HTML paragraphs, ``b`` for
+    plain-text paragraph blocks (default is ``b``).
+
+    ``random`` is the word ``random``, which if given, does not use the common
+    paragraph (starting "Lorem ipsum dolor sit amet, consectetuer...").
+
+    Examples:
+
+    * ``{% lorem %}`` will output the common "lorem ipsum" paragraph
+    * ``{% lorem 3 p %}`` will output the common "lorem ipsum" paragraph
+      and two random paragraphs each wrapped in HTML ``<p>`` tags
+    * ``{% lorem 2 w random %}`` will output two random latin words
+    """
+    bits = list(token.split_contents())
+    tagname = bits[0]
+    # Random bit
+    common = bits[-1] != 'random'
+    if not common:
+        bits.pop()
+    # Method bit
+    if bits[-1] in ('w', 'p', 'b'):
+        method = bits.pop()
+    else:
+        method = 'b'
+    # Count bit
+    if len(bits) > 1:
+        count = bits.pop()
+    else:
+        count = '1'
+    count = parser.compile_filter(count)
+    if len(bits) != 1:
+        raise TemplateSyntaxError("Incorrect format for %r tag" % tagname)
+    return LoremNode(count, method, common)
 
 
 @register.tag
@@ -1345,12 +1404,7 @@ def url(parser, token):
     if len(bits) < 2:
         raise TemplateSyntaxError("'%s' takes at least one argument"
                                   " (path to a view)" % bits[0])
-    try:
-        viewname = parser.compile_filter(bits[1])
-    except TemplateSyntaxError as exc:
-        exc.args = (exc.args[0] + ". "
-                "The syntax of 'url' changed in Django 1.5, see the docs."),
-        raise
+    viewname = parser.compile_filter(bits[1])
     args = []
     kwargs = {}
     asvar = None

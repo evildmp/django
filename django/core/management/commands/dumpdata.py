@@ -1,56 +1,60 @@
 import warnings
 
 from collections import OrderedDict
-from optparse import make_option
 
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 from django.core import serializers
 from django.db import router, DEFAULT_DB_ALIAS
+from django.utils.deprecation import RemovedInDjango19Warning
 
 
 class Command(BaseCommand):
-    option_list = BaseCommand.option_list + (
-        make_option('--format', default='json', dest='format',
-            help='Specifies the output serialization format for fixtures.'),
-        make_option('--indent', default=None, dest='indent', type='int',
-            help='Specifies the indent level to use when pretty-printing output'),
-        make_option('--database', action='store', dest='database',
-            default=DEFAULT_DB_ALIAS,
-            help='Nominates a specific database to dump fixtures from. '
-                 'Defaults to the "default" database.'),
-        make_option('-e', '--exclude', dest='exclude', action='append', default=[],
-            help='An app_label or app_label.ModelName to exclude '
-                 '(use multiple --exclude to exclude multiple apps/models).'),
-        make_option('-n', '--natural', action='store_true', dest='use_natural_keys', default=False,
-            help='Use natural keys if they are available.'),
-        make_option('--natural-foreign', action='store_true', dest='use_natural_foreign_keys', default=False,
-            help='Use natural foreign keys if they are available.'),
-        make_option('--natural-primary', action='store_true', dest='use_natural_primary_keys', default=False,
-            help='Use natural primary keys if they are available.'),
-        make_option('-a', '--all', action='store_true', dest='use_base_manager', default=False,
-            help="Use Django's base manager to dump all models stored in the database, "
-                 "including those that would otherwise be filtered or modified by a custom manager."),
-        make_option('--pks', dest='primary_keys',
-            help="Only dump objects with given primary keys. "
-                 "Accepts a comma separated list of keys. "
-                 "This option will only work when you specify one model."),
-    )
     help = ("Output the contents of the database as a fixture of the given "
             "format (using each model's default manager unless --all is "
             "specified).")
-    args = '[app_label app_label.ModelName ...]'
+
+    def add_arguments(self, parser):
+        parser.add_argument('args', metavar='app_label[.ModelName]', nargs='*',
+            help='Restricts dumped data to the specified app_label or app_label.ModelName.')
+        parser.add_argument('--format', default='json', dest='format',
+            help='Specifies the output serialization format for fixtures.')
+        parser.add_argument('--indent', default=None, dest='indent', type=int,
+            help='Specifies the indent level to use when pretty-printing output.')
+        parser.add_argument('--database', action='store', dest='database',
+            default=DEFAULT_DB_ALIAS,
+            help='Nominates a specific database to dump fixtures from. '
+                 'Defaults to the "default" database.')
+        parser.add_argument('-e', '--exclude', dest='exclude', action='append', default=[],
+            help='An app_label or app_label.ModelName to exclude '
+                 '(use multiple --exclude to exclude multiple apps/models).')
+        parser.add_argument('-n', '--natural', action='store_true', dest='use_natural_keys', default=False,
+            help='Use natural keys if they are available (deprecated: use --natural-foreign instead).')
+        parser.add_argument('--natural-foreign', action='store_true', dest='use_natural_foreign_keys', default=False,
+            help='Use natural foreign keys if they are available.')
+        parser.add_argument('--natural-primary', action='store_true', dest='use_natural_primary_keys', default=False,
+            help='Use natural primary keys if they are available.')
+        parser.add_argument('-a', '--all', action='store_true', dest='use_base_manager', default=False,
+            help="Use Django's base manager to dump all models stored in the database, "
+                 "including those that would otherwise be filtered or modified by a custom manager.")
+        parser.add_argument('--pks', dest='primary_keys',
+            help="Only dump objects with given primary keys. "
+                 "Accepts a comma separated list of keys. "
+                 "This option will only work when you specify one model.")
+        parser.add_argument('-o', '--output', default=None, dest='output',
+            help='Specifies file to which the output is written.')
 
     def handle(self, *app_labels, **options):
         format = options.get('format')
         indent = options.get('indent')
         using = options.get('database')
         excludes = options.get('exclude')
+        output = options.get('output')
         show_traceback = options.get('traceback')
         use_natural_keys = options.get('use_natural_keys')
         if use_natural_keys:
             warnings.warn("``--natural`` is deprecated; use ``--natural-foreign`` instead.",
-                PendingDeprecationWarning)
+                RemovedInDjango19Warning)
         use_natural_foreign_keys = options.get('use_natural_foreign_keys') or use_natural_keys
         use_natural_primary_keys = options.get('use_natural_primary_keys')
         use_base_manager = options.get('use_base_manager')
@@ -151,10 +155,15 @@ class Command(BaseCommand):
 
         try:
             self.stdout.ending = None
-            serializers.serialize(format, get_objects(), indent=indent,
-                    use_natural_foreign_keys=use_natural_foreign_keys,
-                    use_natural_primary_keys=use_natural_primary_keys,
-                    stream=self.stdout)
+            stream = open(output, 'w') if output else None
+            try:
+                serializers.serialize(format, get_objects(), indent=indent,
+                        use_natural_foreign_keys=use_natural_foreign_keys,
+                        use_natural_primary_keys=use_natural_primary_keys,
+                        stream=stream or self.stdout)
+            finally:
+                if stream:
+                    stream.close()
         except Exception as e:
             if show_traceback:
                 raise
@@ -185,17 +194,21 @@ def sort_dependencies(app_list):
             else:
                 deps = []
 
-            # Now add a dependency for any FK or M2M relation with
-            # a model that defines a natural key
+            # Now add a dependency for any FK relation with a model that
+            # defines a natural key
             for field in model._meta.fields:
                 if hasattr(field.rel, 'to'):
                     rel_model = field.rel.to
                     if hasattr(rel_model, 'natural_key') and rel_model != model:
                         deps.append(rel_model)
+            # Also add a dependency for any simple M2M relation with a model
+            # that defines a natural key.  M2M relations with explicit through
+            # models don't count as dependencies.
             for field in model._meta.many_to_many:
-                rel_model = field.rel.to
-                if hasattr(rel_model, 'natural_key') and rel_model != model:
-                    deps.append(rel_model)
+                if field.rel.through._meta.auto_created:
+                    rel_model = field.rel.to
+                    if hasattr(rel_model, 'natural_key') and rel_model != model:
+                        deps.append(rel_model)
             model_dependencies.append((model, deps))
 
     model_dependencies.reverse()

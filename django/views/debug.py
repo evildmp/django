@@ -7,8 +7,9 @@ import sys
 import types
 
 from django.conf import settings
-from django.http import (HttpResponse, HttpResponseServerError,
-    HttpResponseNotFound, HttpRequest, build_request_repr)
+from django.core.urlresolvers import resolve, Resolver404
+from django.http import (HttpResponse, HttpResponseNotFound, HttpRequest,
+    build_request_repr)
 from django.template import Template, Context, TemplateDoesNotExist
 from django.template.defaultfilters import force_escape, pprint
 from django.utils.datastructures import MultiValueDict
@@ -16,8 +17,9 @@ from django.utils.html import escape
 from django.utils.encoding import force_bytes, smart_text
 from django.utils.module_loading import import_string
 from django.utils import six
+from django.utils.translation import ugettext as _
 
-HIDDEN_SETTINGS = re.compile('API|TOKEN|KEY|SECRET|PASS|PROFANITIES_LIST|SIGNATURE')
+HIDDEN_SETTINGS = re.compile('API|TOKEN|KEY|SECRET|PASS|SIGNATURE')
 
 CLEANSED_SUBSTITUTE = '********************'
 
@@ -29,6 +31,19 @@ def linebreak_iter(template_source):
         yield p + 1
         p = template_source.find('\n', p + 1)
     yield len(template_source) + 1
+
+
+class CallableSettingWrapper(object):
+    """ Object to wrap callable appearing in settings
+
+    * Not to call in the debug page (#21345).
+    * Not to break the debug page if the callable forbidding to set attributes (#23070).
+    """
+    def __init__(self, callable_setting):
+        self._wrapped = callable_setting
+
+    def __repr__(self):
+        return repr(self._wrapped)
 
 
 def cleanse_setting(key, value):
@@ -50,7 +65,8 @@ def cleanse_setting(key, value):
         cleansed = value
 
     if callable(cleansed):
-        cleansed.do_not_call_in_templates = True
+        # For fixing #21345 and #23070
+        cleansed = CallableSettingWrapper(cleansed)
 
     return cleansed
 
@@ -64,7 +80,7 @@ def get_safe_settings():
     return settings_dict
 
 
-def technical_500_response(request, exc_type, exc_value, tb):
+def technical_500_response(request, exc_type, exc_value, tb, status_code=500):
     """
     Create a technical server error response. The last three arguments are
     the values returned from sys.exc_info() and friends.
@@ -72,10 +88,10 @@ def technical_500_response(request, exc_type, exc_value, tb):
     reporter = ExceptionReporter(request, exc_type, exc_value, tb)
     if request.is_ajax():
         text = reporter.get_traceback_text()
-        return HttpResponseServerError(text, content_type='text/plain')
+        return HttpResponse(text, status=status_code, content_type='text/plain')
     else:
         html = reporter.get_traceback_html()
-        return HttpResponseServerError(html, content_type='text/html')
+        return HttpResponse(html, status=status_code, content_type='text/html')
 
 # Cache for the default exception reporter filter instance.
 default_exception_reporter_filter = None
@@ -293,7 +309,17 @@ class ExceptionReporter(object):
         frames = self.get_traceback_frames()
         for i, frame in enumerate(frames):
             if 'vars' in frame:
-                frame['vars'] = [(k, force_escape(pprint(v))) for k, v in frame['vars']]
+                frame_vars = []
+                for k, v in frame['vars']:
+                    v = pprint(v)
+                    # The force_escape filter assume unicode, make sure that works
+                    if isinstance(v, six.binary_type):
+                        v = v.decode('utf-8', 'replace')  # don't choke on non-utf-8 input
+                    # Trim large blobs of data
+                    if len(v) > 4096:
+                        v = '%s... <trimmed %d bytes string>' % (v[0:4096], len(v))
+                    frame_vars.append((k, force_escape(v)))
+                frame['vars'] = frame_vars
             frames[i] = frame
 
         unicode_hint = ''
@@ -495,6 +521,23 @@ def technical_404_response(request, exception):
     if isinstance(urlconf, types.ModuleType):
         urlconf = urlconf.__name__
 
+    caller = ''
+    try:
+        resolver_match = resolve(request.path)
+    except Resolver404:
+        pass
+    else:
+        obj = resolver_match.func
+
+        if hasattr(obj, '__name__'):
+            caller = obj.__name__
+        elif hasattr(obj, '__class__') and hasattr(obj.__class__, '__name__'):
+            caller = obj.__class__.__name__
+
+        if hasattr(obj, '__module__'):
+            module = obj.__module__
+            caller = '%s.%s' % (module, caller)
+
     t = Template(TECHNICAL_404_TEMPLATE, name='Technical 404 template')
     c = Context({
         'urlconf': urlconf,
@@ -504,6 +547,7 @@ def technical_404_response(request, exception):
         'reason': force_bytes(exception, errors='replace'),
         'request': request,
         'settings': get_safe_settings(),
+        'raising_view_name': caller,
     })
     return HttpResponseNotFound(t.render(c), content_type='text/html')
 
@@ -511,7 +555,17 @@ def technical_404_response(request, exception):
 def default_urlconf(request):
     "Create an empty URLconf 404 error response."
     t = Template(DEFAULT_URLCONF_TEMPLATE, name='Default URLconf template')
-    c = Context({})
+
+    c = Context({
+        "title": _("Welcome to Django"),
+        "heading": _("It worked!"),
+        "subheading": _("Congratulations on your first Django-powered page."),
+        "instructions": _("Of course, you haven't actually done any work yet. "
+            "Next, start your first app by running <code>python manage.py startapp [app_label]</code>."),
+        "explanation": _("You're seeing this message because you have <code>DEBUG = True</code> in your "
+            "Django settings file and you haven't configured any URLs. Get to work!"),
+    })
+
     return HttpResponse(t.render(c), content_type='text/html')
 
 #
@@ -976,7 +1030,7 @@ Exception Value: {{ exception_value|force_escape }}
     <p>
       You're seeing this error because you have <code>DEBUG = True</code> in your
       Django settings file. Change that to <code>False</code>, and Django will
-      display a standard 500 page.
+      display a standard page generated by the handler for this status code.
     </p>
   </div>
 {% endif %}
@@ -984,7 +1038,7 @@ Exception Value: {{ exception_value|force_escape }}
 </html>
 """
 
-TECHNICAL_500_TEXT_TEMPLATE = """{% load firstof from future %}{% firstof exception_type 'Report' %}{% if request %} at {{ request.path_info }}{% endif %}
+TECHNICAL_500_TEXT_TEMPLATE = """{% firstof exception_type 'Report' %}{% if request %} at {{ request.path_info }}{% endif %}
 {% firstof exception_value 'No exception message supplied' %}
 {% if request %}
 Request Method: {{ request.META.REQUEST_METHOD }}
@@ -1042,7 +1096,7 @@ Using settings module {{ settings.SETTINGS_MODULE }}{% for k, v in settings.item
 
 You're seeing this error because you have DEBUG = True in your
 Django settings file. Change that to False, and Django will
-display a standard 500 page.
+display a standard page generated by the handler for this status code.
 """
 
 TECHNICAL_404_TEMPLATE = """
@@ -1080,8 +1134,14 @@ TECHNICAL_404_TEMPLATE = """
       </tr>
       <tr>
         <th>Request URL:</th>
-      <td>{{ request.build_absolute_uri|escape }}</td>
+        <td>{{ request.build_absolute_uri|escape }}</td>
       </tr>
+      {% if raising_view_name %}
+      <tr>
+        <th>Raised by:</th>
+        <td>{{ raising_view_name }}</td>
+      </tr>
+      {% endif %}
     </table>
   </div>
   <div id="info">
@@ -1121,7 +1181,7 @@ DEFAULT_URLCONF_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en"><head>
   <meta http-equiv="content-type" content="text/html; charset=utf-8">
-  <meta name="robots" content="NONE,NOARCHIVE"><title>Welcome to Django</title>
+  <meta name="robots" content="NONE,NOARCHIVE"><title>{{ title }}</title>
   <style type="text/css">
     html * { padding:0; margin:0; }
     body * { padding:10px 20px; }
@@ -1147,21 +1207,19 @@ DEFAULT_URLCONF_TEMPLATE = """
 
 <body>
 <div id="summary">
-  <h1>It worked!</h1>
-  <h2>Congratulations on your first Django-powered page.</h2>
+  <h1>{{ heading }}</h1>
+  <h2>{{ subheading }}</h2>
 </div>
 
 <div id="instructions">
   <p>
-    Of course, you haven't actually done any work yet.
-    Next, start your first app by running <code>python manage.py startapp [app_label]</code>.
+    {{ instructions|safe }}
   </p>
 </div>
 
 <div id="explanation">
   <p>
-    You're seeing this message because you have <code>DEBUG = True</code> in your
-    Django settings file and you haven't configured any URLs. Get to work!
+    {{ explanation|safe }}
   </p>
 </div>
 </body></html>

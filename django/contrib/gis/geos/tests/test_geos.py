@@ -10,7 +10,6 @@ from io import BytesIO
 
 from django.contrib.gis.gdal import HAS_GDAL
 
-from django.contrib.gis import memoryview
 from django.contrib.gis.geometry.test_data import TestDataMixin
 
 from django.utils.encoding import force_bytes
@@ -28,18 +27,6 @@ if HAS_GEOS:
 
 @skipUnless(HAS_GEOS, "Geos is required.")
 class GEOSTest(unittest.TestCase, TestDataMixin):
-
-    @property
-    def null_srid(self):
-        """
-        Returns the proper null SRID depending on the GEOS version.
-        See the comments in `test_srid` for more details.
-        """
-        info = geos_version_info()
-        if info['version'] == '3.0.0' and info['release_candidate']:
-            return -1
-        else:
-            return None
 
     def test_base(self):
         "Tests out the GEOSBase class."
@@ -68,7 +55,7 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
 
         # Because pointers have been set to NULL, an exception should be
         # raised when we try to access it.  Raising an exception is
-        # preferrable to a segmentation fault that commonly occurs when
+        # preferable to a segmentation fault that commonly occurs when
         # a C method is given a NULL memory reference.
         for fg in (fg1, fg2):
             # Equivalent to `fg.ptr`
@@ -116,16 +103,14 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
 
         # HEXEWKB should be appropriate for its dimension -- have to use an
         # a WKBWriter w/dimension set accordingly, else GEOS will insert
-        # garbage into 3D coordinate if there is none.  Also, GEOS has a
-        # a bug in versions prior to 3.1 that puts the X coordinate in
-        # place of Z; an exception should be raised on those versions.
+        # garbage into 3D coordinate if there is none.
         self.assertEqual(hexewkb_2d, pnt_2d.hexewkb)
         self.assertEqual(hexewkb_3d, pnt_3d.hexewkb)
         self.assertEqual(True, GEOSGeometry(hexewkb_3d).hasz)
 
         # Same for EWKB.
-        self.assertEqual(memoryview(a2b_hex(hexewkb_2d)), pnt_2d.ewkb)
-        self.assertEqual(memoryview(a2b_hex(hexewkb_3d)), pnt_3d.ewkb)
+        self.assertEqual(six.memoryview(a2b_hex(hexewkb_2d)), pnt_2d.ewkb)
+        self.assertEqual(six.memoryview(a2b_hex(hexewkb_3d)), pnt_3d.ewkb)
 
         # Redundant sanity check.
         self.assertEqual(4326, GEOSGeometry(hexewkb_2d).srid)
@@ -146,7 +131,7 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
                 fromstr(err.wkt)
 
         # Bad WKB
-        self.assertRaises(GEOSException, GEOSGeometry, memoryview(b'0'))
+        self.assertRaises(GEOSException, GEOSGeometry, six.memoryview(b'0'))
 
         class NotAGeometry(object):
             pass
@@ -167,16 +152,16 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
         "Testing creation from HEX."
         for g in self.geometries.hex_wkt:
             geom_h = GEOSGeometry(g.hex)
-            # we need to do this so decimal places get normalised
+            # we need to do this so decimal places get normalized
             geom_t = fromstr(g.wkt)
             self.assertEqual(geom_t.wkt, geom_h.wkt)
 
     def test_create_wkb(self):
         "Testing creation from WKB."
         for g in self.geometries.hex_wkt:
-            wkb = memoryview(a2b_hex(g.hex.encode()))
+            wkb = six.memoryview(a2b_hex(g.hex.encode()))
             geom_h = GEOSGeometry(wkb)
-            # we need to do this so decimal places get normalised
+            # we need to do this so decimal places get normalized
             geom_t = fromstr(g.wkt)
             self.assertEqual(geom_t.wkt, geom_h.wkt)
 
@@ -503,7 +488,8 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
         del poly
 
         # Access to these rings is OK since they are clones.
-        s1, s2 = str(ring1), str(ring2)
+        str(ring1)
+        str(ring2)
 
     def test_coord_seq(self):
         "Testing Coordinate Sequence objects."
@@ -651,13 +637,8 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
         p1 = fromstr(hex)
         self.assertEqual(4326, p1.srid)
 
-        # In GEOS 3.0.0rc1-4  when the EWKB and/or HEXEWKB is exported,
-        # the SRID information is lost and set to -1 -- this is not a
-        # problem on the 3.0.0 version (another reason to upgrade).
-        exp_srid = self.null_srid
-
         p2 = fromstr(p1.hex)
-        self.assertEqual(exp_srid, p2.srid)
+        self.assertIsNone(p2.srid)
         p3 = fromstr(p1.hex, srid=-1)  # -1 is intended.
         self.assertEqual(-1, p3.srid)
 
@@ -788,7 +769,7 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
         ls = LineString((0, 0), (1, 1))
         self.assertAlmostEqual(1.41421356237, ls.length, 11)
 
-        # Should be circumfrence of Polygon
+        # Should be circumference of Polygon
         poly = Polygon(LinearRing((0, 0), (0, 1), (1, 1), (1, 0), (0, 0)))
         self.assertEqual(4.0, poly.length)
 
@@ -1005,17 +986,14 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
         tgeoms = get_geoms(self.geometries.points)
         tgeoms.extend(get_geoms(self.geometries.multilinestrings, 4326))
         tgeoms.extend(get_geoms(self.geometries.polygons, 3084))
-        tgeoms.extend(get_geoms(self.geometries.multipolygons, 900913))
+        tgeoms.extend(get_geoms(self.geometries.multipolygons, 3857))
 
-        # The SRID won't be exported in GEOS 3.0 release candidates.
-        no_srid = self.null_srid == -1
         for geom in tgeoms:
             s1, s2 = cPickle.dumps(geom), pickle.dumps(geom)
             g1, g2 = cPickle.loads(s1), pickle.loads(s2)
             for tmpg in (g1, g2):
                 self.assertEqual(geom, tmpg)
-                if not no_srid:
-                    self.assertEqual(geom.srid, tmpg.srid)
+                self.assertEqual(geom.srid, tmpg.srid)
 
     def test_prepared(self):
         "Testing PreparedGeometry support."
@@ -1071,7 +1049,7 @@ class GEOSTest(unittest.TestCase, TestDataMixin):
         self.assertIsInstance(g.valid_reason, six.string_types)
         self.assertTrue(g.valid_reason.startswith("Too few points in geometry component"))
 
-    @skipUnless(HAS_GEOS and geos_version_info()['version'] >= '3.2.0', "geos >= 3.2.0 is required")
+    @skipUnless(HAS_GEOS, "Geos is required.")
     def test_linearref(self):
         "Testing linear referencing"
 

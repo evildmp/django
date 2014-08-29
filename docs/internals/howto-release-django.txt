@@ -7,7 +7,7 @@ be driving a release, you should follow these instructions to get the
 package out.
 
 **Please, keep these instructions up-to-date if you make changes!** The point
-here is to be descriptive, not proscriptive, so feel free to streamline or
+here is to be descriptive, not prescriptive, so feel free to streamline or
 otherwise make changes, but **update this document accordingly!**
 
 Overview
@@ -87,11 +87,12 @@ any time leading up to the actual release:
    the release. We maintain a list of who gets these pre-notification emails in
    the private ``django-core`` repository. This email should be signed by the
    key you'll use for the release, and should include patches for each issue
-   being fixed.
+   being fixed. Also make sure to update the security issues archive; this will
+   be in ``docs/releases/security.txt``.
 
 #. If this is a major release, make sure the tests pass, then increase
    the default PBKDF2 iterations in
-   ``django.contrib.auth.hashers.PBKDF2PasswordHasher`` by about 10%
+   ``django.contrib.auth.hashers.PBKDF2PasswordHasher`` by about 20%
    (pick a round number). Run the tests, and update the 3 failing
    hasher tests with the new values. Make sure this gets noted in the
    release notes (see release notes on 1.6 for an example).
@@ -100,7 +101,7 @@ any time leading up to the actual release:
    are left for the upcoming release.
 
 #. Check with the other committers to make sure they don't have any
-   un-committed changes for the release.
+   uncommitted changes for the release.
 
 #. Proofread the release notes, including looking at the online
    version to catch any broken links or reST errors, and make sure the
@@ -133,7 +134,7 @@ OK, this is the fun part, where we actually push out a release!
 #. Check `Jenkins`__ is green for the version(s) you're putting out. You
    probably shouldn't issue a release until it's green.
 
-   __ http://ci.djangoproject.com
+   __ http://djangoci.com
 
 #. A release always begins from a release branch, so you should make sure
    you're on a stable branch and up-to-date. For example::
@@ -169,8 +170,9 @@ OK, this is the fun part, where we actually push out a release!
 
    __ https://github.com/django/django/commit/18d920ea4839fb54f9d2a5dcb555b6a5666ee469
 
-#. For a version release, remove the ``UNDER DEVELOPMENT`` header at the top of
-   the release notes.
+#. For a major version release, remove the ``UNDER DEVELOPMENT`` header at the
+   top of the release notes and add the release date on the next line. For a
+   minor release, replace ``*Under Development*`` with the release date.
 
 #. If this is a pre-release package, update the "Development Status" trove
    classifier in ``setup.py`` to reflect this. Otherwise, make sure the

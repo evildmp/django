@@ -13,7 +13,7 @@ from django.db.utils import ProgrammingError
 from django.utils import six
 from django.utils.functional import cached_property
 
-from .models import GeometryColumns, SpatialRefSys
+from .models import PostGISGeometryColumns, PostGISSpatialRefSys
 
 
 #### Classes used in constructing PostGIS spatial SQL ####
@@ -74,6 +74,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
     compiler_module = 'django.contrib.gis.db.models.sql.compiler'
     name = 'postgis'
     postgis = True
+    geography = True
     geom_func_prefix = 'ST_'
     version_regex = re.compile(r'^(?P<major>\d)\.(?P<minor1>\d)\.(?P<minor2>\d+)')
     valid_aggregates = {'Collect', 'Extent', 'Extent3D', 'MakeLine', 'Union'}
@@ -140,6 +141,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
             'relate': (PostGISRelate, six.string_types),
             'coveredby': PostGISFunction(prefix, 'CoveredBy'),
             'covers': PostGISFunction(prefix, 'Covers'),
+            'contains_properly': PostGISFunction(prefix, 'ContainsProperly'),
         }
 
         # Valid distance types and substitutions
@@ -162,34 +164,17 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         # Adding the distance functions to the geometries lookup.
         self.geometry_functions.update(self.distance_functions)
 
-        # Only PostGIS versions 1.3.4+ have GeoJSON serialization support.
-        if self.spatial_version < (1, 3, 4):
-            GEOJSON = False
-        else:
-            GEOJSON = prefix + 'AsGeoJson'
-
-        # ST_ContainsProperly ST_MakeLine, and ST_GeoHash added in 1.4.
-        if self.spatial_version >= (1, 4, 0):
-            GEOHASH = 'ST_GeoHash'
-            BOUNDINGCIRCLE = 'ST_MinimumBoundingCircle'
-            self.geometry_functions['contains_properly'] = PostGISFunction(prefix, 'ContainsProperly')
-        else:
-            GEOHASH, BOUNDINGCIRCLE = False, False
-
-        # Geography type support added in 1.5.
-        if self.spatial_version >= (1, 5, 0):
-            self.geography = True
-            # Only a subset of the operators and functions are available
-            # for the geography type.
-            self.geography_functions = self.distance_functions.copy()
-            self.geography_functions.update({
-                'coveredby': self.geometry_functions['coveredby'],
-                'covers': self.geometry_functions['covers'],
-                'intersects': self.geometry_functions['intersects'],
-            })
-            self.geography_operators = {
-                'bboverlaps': PostGISOperator('&&'),
-            }
+        # Only a subset of the operators and functions are available
+        # for the geography type.
+        self.geography_functions = self.distance_functions.copy()
+        self.geography_functions.update({
+            'coveredby': self.geometry_functions['coveredby'],
+            'covers': self.geometry_functions['covers'],
+            'intersects': self.geometry_functions['intersects'],
+        })
+        self.geography_operators = {
+            'bboverlaps': PostGISOperator('&&'),
+        }
 
         # Native geometry type support added in PostGIS 2.0.
         if self.spatial_version >= (2, 0, 0):
@@ -201,7 +186,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         self.gis_terms.update(self.geometry_functions)
 
         self.area = prefix + 'Area'
-        self.bounding_circle = BOUNDINGCIRCLE
+        self.bounding_circle = prefix + 'MinimumBoundingCircle'
         self.centroid = prefix + 'Centroid'
         self.collect = prefix + 'Collect'
         self.difference = prefix + 'Difference'
@@ -211,8 +196,8 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         self.envelope = prefix + 'Envelope'
         self.extent = prefix + 'Extent'
         self.force_rhr = prefix + 'ForceRHR'
-        self.geohash = GEOHASH
-        self.geojson = GEOJSON
+        self.geohash = prefix + 'GeoHash'
+        self.geojson = prefix + 'AsGeoJson'
         self.gml = prefix + 'AsGML'
         self.intersection = prefix + 'Intersection'
         self.kml = prefix + 'AsKML'
@@ -261,7 +246,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
             except ProgrammingError:
                 raise ImproperlyConfigured(
                     'Cannot determine PostGIS version for database "%s". '
-                    'GeoDjango requires at least PostGIS version 1.3. '
+                    'GeoDjango requires at least PostGIS version 1.5. '
                     'Was the database created from a spatial database '
                     'template?' % self.connection.settings_dict['NAME']
                 )
@@ -290,7 +275,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
     def convert_extent3d(self, box3d):
         """
         Returns a 6-tuple extent for the `Extent3D` aggregate by converting
-        the 3d bounding-box text returnded by PostGIS (`box3d` argument), for
+        the 3d bounding-box text returned by PostGIS (`box3d` argument), for
         example: "BOX3D(-90.0 30.0 1, -85.0 40.0 2)".
         """
         ll, ur = box3d[6:-1].split(',')
@@ -315,12 +300,8 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         has been specified to be of geography type instead.
         """
         if f.geography:
-            if not self.geography:
-                raise NotImplementedError('PostGIS 1.5 required for geography column support.')
-
             if f.srid != 4326:
-                raise NotImplementedError('PostGIS 1.5 supports geography columns '
-                                          'only with an SRID of 4326.')
+                raise NotImplementedError('PostGIS only supports geography columns with an SRID of 4326.')
 
             return 'geography(%s,%d)' % (f.geom_type, f.srid)
         elif self.geometry:
@@ -342,7 +323,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         This is the most complex implementation of the spatial backends due to
         what is supported on geodetic geometry columns vs. what's available on
         projected geometry columns.  In addition, it has to take into account
-        the newly introduced geography column type introudced in PostGIS 1.5.
+        the geography column type newly introduced in PostGIS 1.5.
         """
         # Getting the distance parameter and any options.
         if len(dist_val) == 1:
@@ -352,7 +333,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
 
         # Shorthand boolean flags.
         geodetic = f.geodetic(self.connection)
-        geography = f.geography and self.geography
+        geography = f.geography
 
         if isinstance(value, Distance):
             if geography:
@@ -481,14 +462,14 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         geo_col, db_type = lvalue
 
         if lookup_type in self.geometry_operators:
-            if field.geography and not lookup_type in self.geography_operators:
+            if field.geography and lookup_type not in self.geography_operators:
                 raise ValueError('PostGIS geography does not support the '
                                  '"%s" lookup.' % lookup_type)
             # Handling a PostGIS operator.
             op = self.geometry_operators[lookup_type]
             return op.as_sql(geo_col, self.get_geom_placeholder(field, value))
         elif lookup_type in self.geometry_functions:
-            if field.geography and not lookup_type in self.geography_functions:
+            if field.geography and lookup_type not in self.geography_functions:
                 raise ValueError('PostGIS geography type does not support the '
                                  '"%s" lookup.' % lookup_type)
 
@@ -525,15 +506,6 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
                     op = op(self.geom_func_prefix, value[1])
                 elif lookup_type in self.distance_functions and lookup_type != 'dwithin':
                     if not field.geography and field.geodetic(self.connection):
-                        # Geodetic distances are only available from Points to
-                        # PointFields on PostGIS 1.4 and below.
-                        if not self.connection.ops.geography:
-                            if field.geom_type != 'POINT':
-                                raise ValueError('PostGIS spherical operations are only valid on PointFields.')
-
-                            if str(geom.geom_type) != 'Point':
-                                raise ValueError('PostGIS geometry distance parameter is required to be of type Point.')
-
                         # Setting up the geodetic operation appropriately.
                         if nparams == 3 and value[2] == 'spheroid':
                             op = op['spheroid']
@@ -561,7 +533,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         """
         agg_name = agg.__class__.__name__
         if not self.check_aggregate_support(agg):
-            raise NotImplementedError('%s spatial aggregate is not implmented for this backend.' % agg_name)
+            raise NotImplementedError('%s spatial aggregate is not implemented for this backend.' % agg_name)
         agg_name = agg_name.lower()
         if agg_name == 'union':
             agg_name += 'agg'
@@ -571,7 +543,7 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
 
     # Routines for getting the OGC-compliant models.
     def geometry_columns(self):
-        return GeometryColumns
+        return PostGISGeometryColumns
 
     def spatial_ref_sys(self):
-        return SpatialRefSys
+        return PostGISSpatialRefSys

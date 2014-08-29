@@ -101,7 +101,7 @@ class Item(models.Model):
     name = models.CharField(max_length=10)
     created = models.DateTimeField()
     modified = models.DateTimeField(blank=True, null=True)
-    tags = models.ManyToManyField(Tag, blank=True, null=True)
+    tags = models.ManyToManyField(Tag, blank=True)
     creator = models.ForeignKey(Author)
     note = models.ForeignKey(Note)
 
@@ -153,7 +153,7 @@ class Number(models.Model):
     def __str__(self):
         return six.text_type(self.num)
 
-# Symmetrical m2m field with a normal field using the reverse accesor name
+# Symmetrical m2m field with a normal field using the reverse accessor name
 # ("valid").
 
 
@@ -364,9 +364,13 @@ class Plaything(models.Model):
         return self.name
 
 
+@python_2_unicode_compatible
 class Article(models.Model):
     name = models.CharField(max_length=20)
     created = models.DateTimeField()
+
+    def __str__(self):
+        return self.name
 
 
 @python_2_unicode_compatible
@@ -405,6 +409,15 @@ class ObjectA(models.Model):
         return self.name
 
 
+class ProxyObjectA(ObjectA):
+    class Meta:
+        proxy = True
+
+
+class ChildObjectA(ObjectA):
+    pass
+
+
 @python_2_unicode_compatible
 class ObjectB(models.Model):
     name = models.CharField(max_length=50)
@@ -415,11 +428,17 @@ class ObjectB(models.Model):
         return self.name
 
 
+class ProxyObjectB(ObjectB):
+    class Meta:
+        proxy = True
+
+
 @python_2_unicode_compatible
 class ObjectC(models.Model):
     name = models.CharField(max_length=50)
     objecta = models.ForeignKey(ObjectA, null=True)
     objectb = models.ForeignKey(ObjectB, null=True)
+    childobjecta = models.ForeignKey(ChildObjectA, null=True, related_name='ca_pk')
 
     def __str__(self):
         return self.name
@@ -660,3 +679,18 @@ class Employment(models.Model):
     employer = models.ForeignKey(Company)
     employee = models.ForeignKey(Person)
     title = models.CharField(max_length=128)
+
+
+# Bug #22429
+
+class School(models.Model):
+    pass
+
+
+class Student(models.Model):
+    school = models.ForeignKey(School)
+
+
+class Classroom(models.Model):
+    school = models.ForeignKey(School)
+    students = models.ManyToManyField(Student, related_name='classroom')

@@ -31,14 +31,21 @@ import pickle
 import re
 import os
 from decimal import Decimal
+from unittest import skipIf
+import warnings
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.forms import (
     BooleanField, CharField, ChoiceField, ComboField, DateField, DateTimeField,
     DecimalField, EmailField, Field, FileField, FilePathField, FloatField,
-    Form, forms, HiddenInput, IntegerField, MultipleChoiceField,
+    Form, forms, HiddenInput, ImageField, IntegerField, MultipleChoiceField,
     NullBooleanField, NumberInput, PasswordInput, RadioSelect, RegexField,
-    SplitDateTimeField, TextInput, TimeField, TypedChoiceField,
+    SplitDateTimeField, TextInput, Textarea, TimeField, TypedChoiceField,
     TypedMultipleChoiceField, URLField, ValidationError, Widget,
 )
 from django.test import SimpleTestCase
@@ -148,14 +155,13 @@ class FieldsTests(SimpleTestCase):
         # Return an empty dictionary if max_length is None
         f = CharField()
         self.assertEqual(f.widget_attrs(TextInput()), {})
-
-        # Or if the widget is not TextInput or PasswordInput
-        f = CharField(max_length=10)
-        self.assertEqual(f.widget_attrs(HiddenInput()), {})
+        self.assertEqual(f.widget_attrs(Textarea()), {})
 
         # Otherwise, return a maxlength attribute equal to max_length
+        f = CharField(max_length=10)
         self.assertEqual(f.widget_attrs(TextInput()), {'maxlength': '10'})
         self.assertEqual(f.widget_attrs(PasswordInput()), {'maxlength': '10'})
+        self.assertEqual(f.widget_attrs(Textarea()), {'maxlength': '10'})
 
     # IntegerField ################################################################
 
@@ -240,6 +246,18 @@ class FieldsTests(SimpleTestCase):
         f1 = IntegerField(localize=True)
         self.assertWidgetRendersTo(f1, '<input id="id_f" name="f" type="text" />')
 
+    def test_integerfield_subclass(self):
+        """
+        Test that class-defined widget is not overwritten by __init__ (#22245).
+        """
+        class MyIntegerField(IntegerField):
+            widget = Textarea
+
+        f = MyIntegerField()
+        self.assertEqual(f.widget.__class__, Textarea)
+        f = MyIntegerField(localize=True)
+        self.assertEqual(f.widget.__class__, Textarea)
+
     # FloatField ##################################################################
 
     def test_floatfield_1(self):
@@ -297,12 +315,12 @@ class FieldsTests(SimpleTestCase):
     def test_floatfield_changed(self):
         f = FloatField()
         n = 4.35
-        self.assertFalse(f._has_changed(n, '4.3500'))
+        self.assertFalse(f.has_changed(n, '4.3500'))
 
         with translation.override('fr'), self.settings(USE_L10N=True):
             f = FloatField(localize=True)
             localized_n = formats.localize_input(n)  # -> '4,35' in French
-            self.assertFalse(f._has_changed(n, localized_n))
+            self.assertFalse(f.has_changed(n, localized_n))
 
     # DecimalField ################################################################
 
@@ -410,13 +428,13 @@ class FieldsTests(SimpleTestCase):
     def test_decimalfield_changed(self):
         f = DecimalField(max_digits=2, decimal_places=2)
         d = Decimal("0.1")
-        self.assertFalse(f._has_changed(d, '0.10'))
-        self.assertTrue(f._has_changed(d, '0.101'))
+        self.assertFalse(f.has_changed(d, '0.10'))
+        self.assertTrue(f.has_changed(d, '0.101'))
 
         with translation.override('fr'), self.settings(USE_L10N=True):
             f = DecimalField(max_digits=2, decimal_places=2, localize=True)
             localized_d = formats.localize_input(d)  # -> '0,1' in French
-            self.assertFalse(f._has_changed(d, localized_d))
+            self.assertFalse(f.has_changed(d, localized_d))
 
     # DateField ###################################################################
 
@@ -475,7 +493,11 @@ class FieldsTests(SimpleTestCase):
         format = '%d/%m/%Y'
         f = DateField(input_formats=[format])
         d = datetime.date(2007, 9, 17)
-        self.assertFalse(f._has_changed(d, '17/09/2007'))
+        self.assertFalse(f.has_changed(d, '17/09/2007'))
+        # Test for deprecated behavior _has_changed
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            self.assertFalse(f._has_changed(d, '17/09/2007'))
 
     def test_datefield_strptime(self):
         """Test that field.strptime doesn't raise an UnicodeEncodeError (#16123)"""
@@ -517,9 +539,9 @@ class FieldsTests(SimpleTestCase):
         t1 = datetime.time(12, 51, 34, 482548)
         t2 = datetime.time(12, 51)
         f = TimeField(input_formats=['%H:%M', '%H:%M %p'])
-        self.assertTrue(f._has_changed(t1, '12:51'))
-        self.assertFalse(f._has_changed(t2, '12:51'))
-        self.assertFalse(f._has_changed(t2, '12:51 PM'))
+        self.assertTrue(f.has_changed(t1, '12:51'))
+        self.assertFalse(f.has_changed(t2, '12:51'))
+        self.assertFalse(f.has_changed(t2, '12:51 PM'))
 
     # DateTimeField ###############################################################
 
@@ -584,12 +606,12 @@ class FieldsTests(SimpleTestCase):
         format = '%Y %m %d %I:%M %p'
         f = DateTimeField(input_formats=[format])
         d = datetime.datetime(2006, 9, 17, 14, 30, 0)
-        self.assertFalse(f._has_changed(d, '2006 09 17 2:30 PM'))
+        self.assertFalse(f.has_changed(d, '2006 09 17 2:30 PM'))
 
     # RegexField ##################################################################
 
     def test_regexfield_1(self):
-        f = RegexField('^\d[A-F]\d$')
+        f = RegexField('^[0-9][A-F][0-9]$')
         self.assertEqual('2A2', f.clean('2A2'))
         self.assertEqual('3F3', f.clean('3F3'))
         self.assertRaisesMessage(ValidationError, "'Enter a valid value.'", f.clean, '3G3')
@@ -598,14 +620,14 @@ class FieldsTests(SimpleTestCase):
         self.assertRaisesMessage(ValidationError, "'This field is required.'", f.clean, '')
 
     def test_regexfield_2(self):
-        f = RegexField('^\d[A-F]\d$', required=False)
+        f = RegexField('^[0-9][A-F][0-9]$', required=False)
         self.assertEqual('2A2', f.clean('2A2'))
         self.assertEqual('3F3', f.clean('3F3'))
         self.assertRaisesMessage(ValidationError, "'Enter a valid value.'", f.clean, '3G3')
         self.assertEqual('', f.clean(''))
 
     def test_regexfield_3(self):
-        f = RegexField(re.compile('^\d[A-F]\d$'))
+        f = RegexField(re.compile('^[0-9][A-F][0-9]$'))
         self.assertEqual('2A2', f.clean('2A2'))
         self.assertEqual('3F3', f.clean('3F3'))
         self.assertRaisesMessage(ValidationError, "'Enter a valid value.'", f.clean, '3G3')
@@ -613,13 +635,16 @@ class FieldsTests(SimpleTestCase):
         self.assertRaisesMessage(ValidationError, "'Enter a valid value.'", f.clean, '2A2 ')
 
     def test_regexfield_4(self):
-        f = RegexField('^\d\d\d\d$', error_message='Enter a four-digit number.')
+        # deprecated error_message argument; remove in Django 2.0
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            f = RegexField('^[0-9][0-9][0-9][0-9]$', error_message='Enter a four-digit number.')
         self.assertEqual('1234', f.clean('1234'))
         self.assertRaisesMessage(ValidationError, "'Enter a four-digit number.'", f.clean, '123')
         self.assertRaisesMessage(ValidationError, "'Enter a four-digit number.'", f.clean, 'abcd')
 
     def test_regexfield_5(self):
-        f = RegexField('^\d+$', min_length=5, max_length=10)
+        f = RegexField('^[0-9]+$', min_length=5, max_length=10)
         self.assertRaisesMessage(ValidationError, "'Ensure this value has at least 5 characters (it has 3).'", f.clean, '123')
         six.assertRaisesRegex(self, ValidationError, "'Ensure this value has at least 5 characters \(it has 3\)\.', u?'Enter a valid value\.'", f.clean, 'abc')
         self.assertEqual('12345', f.clean('12345'))
@@ -637,7 +662,7 @@ class FieldsTests(SimpleTestCase):
 
     def test_change_regex_after_init(self):
         f = RegexField('^[a-z]+$')
-        f.regex = '^\d+$'
+        f.regex = '^[0-9]+$'
         self.assertEqual('1234', f.clean('1234'))
         self.assertRaisesMessage(ValidationError, "'Enter a valid value.'", f.clean, 'abcd')
 
@@ -710,7 +735,7 @@ class FieldsTests(SimpleTestCase):
 
     def test_filefield_changed(self):
         '''
-        Test for the behavior of _has_changed for FileField. The value of data will
+        Test for the behavior of has_changed for FileField. The value of data will
         more than likely come from request.FILES. The value of initial data will
         likely be a filename stored in the database. Since its value is of no use to
         a FileField it is ignored.
@@ -718,17 +743,35 @@ class FieldsTests(SimpleTestCase):
         f = FileField()
 
         # No file was uploaded and no initial data.
-        self.assertFalse(f._has_changed('', None))
+        self.assertFalse(f.has_changed('', None))
 
         # A file was uploaded and no initial data.
-        self.assertTrue(f._has_changed('', {'filename': 'resume.txt', 'content': 'My resume'}))
+        self.assertTrue(f.has_changed('', {'filename': 'resume.txt', 'content': 'My resume'}))
 
         # A file was not uploaded, but there is initial data
-        self.assertFalse(f._has_changed('resume.txt', None))
+        self.assertFalse(f.has_changed('resume.txt', None))
 
         # A file was uploaded and there is initial data (file identity is not dealt
         # with here)
-        self.assertTrue(f._has_changed('resume.txt', {'filename': 'resume.txt', 'content': 'My resume'}))
+        self.assertTrue(f.has_changed('resume.txt', {'filename': 'resume.txt', 'content': 'My resume'}))
+
+    # ImageField ##################################################################
+
+    @skipIf(Image is None, "Pillow is required to test ImageField")
+    def test_imagefield_annotate_with_image_after_clean(self):
+        f = ImageField()
+
+        img_path = os.path.dirname(upath(__file__)) + '/filepath_test_files/1x1.png'
+        with open(img_path, 'rb') as img_file:
+            img_data = img_file.read()
+
+        img_file = SimpleUploadedFile('1x1.png', img_data)
+        img_file.content_type = 'text/plain'
+
+        uploaded_file = f.clean(img_file)
+
+        self.assertEqual('PNG', uploaded_file.image.format)
+        self.assertEqual('image/png', uploaded_file.content_type)
 
     # URLField ##################################################################
 
@@ -737,14 +780,14 @@ class FieldsTests(SimpleTestCase):
         self.assertWidgetRendersTo(f, '<input type="url" name="f" id="id_f" />')
         self.assertRaisesMessage(ValidationError, "'This field is required.'", f.clean, '')
         self.assertRaisesMessage(ValidationError, "'This field is required.'", f.clean, None)
-        self.assertEqual('http://localhost/', f.clean('http://localhost'))
-        self.assertEqual('http://example.com/', f.clean('http://example.com'))
-        self.assertEqual('http://example.com./', f.clean('http://example.com.'))
-        self.assertEqual('http://www.example.com/', f.clean('http://www.example.com'))
+        self.assertEqual('http://localhost', f.clean('http://localhost'))
+        self.assertEqual('http://example.com', f.clean('http://example.com'))
+        self.assertEqual('http://example.com.', f.clean('http://example.com.'))
+        self.assertEqual('http://www.example.com', f.clean('http://www.example.com'))
         self.assertEqual('http://www.example.com:8000/test', f.clean('http://www.example.com:8000/test'))
-        self.assertEqual('http://valid-with-hyphens.com/', f.clean('valid-with-hyphens.com'))
-        self.assertEqual('http://subdomain.domain.com/', f.clean('subdomain.domain.com'))
-        self.assertEqual('http://200.8.9.10/', f.clean('http://200.8.9.10'))
+        self.assertEqual('http://valid-with-hyphens.com', f.clean('valid-with-hyphens.com'))
+        self.assertEqual('http://subdomain.domain.com', f.clean('subdomain.domain.com'))
+        self.assertEqual('http://200.8.9.10', f.clean('http://200.8.9.10'))
         self.assertEqual('http://200.8.9.10:8000/test', f.clean('http://200.8.9.10:8000/test'))
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'foo')
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'http://')
@@ -757,7 +800,7 @@ class FieldsTests(SimpleTestCase):
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'http://-invalid.com')
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'http://inv-.alid-.com')
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'http://inv-.-alid.com')
-        self.assertEqual('http://valid-----hyphens.com/', f.clean('http://valid-----hyphens.com'))
+        self.assertEqual('http://valid-----hyphens.com', f.clean('http://valid-----hyphens.com'))
         self.assertEqual('http://some.idn.xyz\xe4\xf6\xfc\xdfabc.domain.com:123/blah', f.clean('http://some.idn.xyzäöüßabc.domain.com:123/blah'))
         self.assertEqual('http://www.example.com/s/http://code.djangoproject.com/ticket/13804', f.clean('www.example.com/s/http://code.djangoproject.com/ticket/13804'))
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, '[a')
@@ -776,8 +819,8 @@ class FieldsTests(SimpleTestCase):
         f = URLField(required=False)
         self.assertEqual('', f.clean(''))
         self.assertEqual('', f.clean(None))
-        self.assertEqual('http://example.com/', f.clean('http://example.com'))
-        self.assertEqual('http://www.example.com/', f.clean('http://www.example.com'))
+        self.assertEqual('http://example.com', f.clean('http://example.com'))
+        self.assertEqual('http://www.example.com', f.clean('http://www.example.com'))
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'foo')
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'http://')
         self.assertRaisesMessage(ValidationError, "'Enter a valid URL.'", f.clean, 'http://example')
@@ -787,25 +830,22 @@ class FieldsTests(SimpleTestCase):
     def test_urlfield_5(self):
         f = URLField(min_length=15, max_length=20)
         self.assertWidgetRendersTo(f, '<input id="id_f" type="url" name="f" maxlength="20" />')
-        self.assertRaisesMessage(ValidationError, "'Ensure this value has at least 15 characters (it has 13).'", f.clean, 'http://f.com')
-        self.assertEqual('http://example.com/', f.clean('http://example.com'))
-        self.assertRaisesMessage(ValidationError, "'Ensure this value has at most 20 characters (it has 38).'", f.clean, 'http://abcdefghijklmnopqrstuvwxyz.com')
+        self.assertRaisesMessage(ValidationError, "'Ensure this value has at least 15 characters (it has 12).'", f.clean, 'http://f.com')
+        self.assertEqual('http://example.com', f.clean('http://example.com'))
+        self.assertRaisesMessage(ValidationError, "'Ensure this value has at most 20 characters (it has 37).'", f.clean, 'http://abcdefghijklmnopqrstuvwxyz.com')
 
     def test_urlfield_6(self):
         f = URLField(required=False)
-        self.assertEqual('http://example.com/', f.clean('example.com'))
+        self.assertEqual('http://example.com', f.clean('example.com'))
         self.assertEqual('', f.clean(''))
-        self.assertEqual('https://example.com/', f.clean('https://example.com'))
+        self.assertEqual('https://example.com', f.clean('https://example.com'))
 
     def test_urlfield_7(self):
         f = URLField()
-        self.assertEqual('http://example.com/', f.clean('http://example.com'))
+        self.assertEqual('http://example.com', f.clean('http://example.com'))
         self.assertEqual('http://example.com/test', f.clean('http://example.com/test'))
-
-    def test_urlfield_8(self):
-        # ticket #11826
-        f = URLField()
-        self.assertEqual('http://example.com/?some_param=some_value', f.clean('http://example.com?some_param=some_value'))
+        self.assertEqual('http://example.com?some_param=some_value',
+                         f.clean('http://example.com?some_param=some_value'))
 
     def test_urlfield_9(self):
         f = URLField()
@@ -877,15 +917,15 @@ class FieldsTests(SimpleTestCase):
 
     def test_booleanfield_changed(self):
         f = BooleanField()
-        self.assertFalse(f._has_changed(None, None))
-        self.assertFalse(f._has_changed(None, ''))
-        self.assertFalse(f._has_changed('', None))
-        self.assertFalse(f._has_changed('', ''))
-        self.assertTrue(f._has_changed(False, 'on'))
-        self.assertFalse(f._has_changed(True, 'on'))
-        self.assertTrue(f._has_changed(True, ''))
+        self.assertFalse(f.has_changed(None, None))
+        self.assertFalse(f.has_changed(None, ''))
+        self.assertFalse(f.has_changed('', None))
+        self.assertFalse(f.has_changed('', ''))
+        self.assertTrue(f.has_changed(False, 'on'))
+        self.assertFalse(f.has_changed(True, 'on'))
+        self.assertTrue(f.has_changed(True, ''))
         # Initial value may have mutated to a string due to show_hidden_initial (#19537)
-        self.assertTrue(f._has_changed('False', 'on'))
+        self.assertTrue(f.has_changed('False', 'on'))
 
     # ChoiceField #################################################################
 
@@ -960,8 +1000,8 @@ class FieldsTests(SimpleTestCase):
     def test_typedchoicefield_has_changed(self):
         # has_changed should not trigger required validation
         f = TypedChoiceField(choices=[(1, "+1"), (-1, "-1")], coerce=int, required=True)
-        self.assertFalse(f._has_changed(None, ''))
-        self.assertFalse(f._has_changed(1, '1'))
+        self.assertFalse(f.has_changed(None, ''))
+        self.assertFalse(f.has_changed(1, '1'))
 
     def test_typedchoicefield_special_coerce(self):
         """
@@ -992,6 +1032,8 @@ class FieldsTests(SimpleTestCase):
         self.assertEqual(None, f.clean('2'))
         self.assertEqual(None, f.clean('3'))
         self.assertEqual(None, f.clean('hello'))
+        self.assertEqual(True, f.clean('true'))
+        self.assertEqual(False, f.clean('false'))
 
     def test_nullbooleanfield_2(self):
         # Make sure that the internal value is preserved if using HiddenInput (#7753)
@@ -1027,13 +1069,13 @@ class FieldsTests(SimpleTestCase):
 
     def test_nullbooleanfield_changed(self):
         f = NullBooleanField()
-        self.assertTrue(f._has_changed(False, None))
-        self.assertTrue(f._has_changed(None, False))
-        self.assertFalse(f._has_changed(None, None))
-        self.assertFalse(f._has_changed(False, False))
-        self.assertTrue(f._has_changed(True, False))
-        self.assertTrue(f._has_changed(True, None))
-        self.assertTrue(f._has_changed(True, False))
+        self.assertTrue(f.has_changed(False, None))
+        self.assertTrue(f.has_changed(None, False))
+        self.assertFalse(f.has_changed(None, None))
+        self.assertFalse(f.has_changed(False, False))
+        self.assertTrue(f.has_changed(True, False))
+        self.assertTrue(f.has_changed(True, None))
+        self.assertTrue(f.has_changed(True, False))
 
     # MultipleChoiceField #########################################################
 
@@ -1078,13 +1120,13 @@ class FieldsTests(SimpleTestCase):
 
     def test_multiplechoicefield_changed(self):
         f = MultipleChoiceField(choices=[('1', 'One'), ('2', 'Two'), ('3', 'Three')])
-        self.assertFalse(f._has_changed(None, None))
-        self.assertFalse(f._has_changed([], None))
-        self.assertTrue(f._has_changed(None, ['1']))
-        self.assertFalse(f._has_changed([1, 2], ['1', '2']))
-        self.assertFalse(f._has_changed([2, 1], ['1', '2']))
-        self.assertTrue(f._has_changed([1, 2], ['1']))
-        self.assertTrue(f._has_changed([1, 2], ['1', '3']))
+        self.assertFalse(f.has_changed(None, None))
+        self.assertFalse(f.has_changed([], None))
+        self.assertTrue(f.has_changed(None, ['1']))
+        self.assertFalse(f.has_changed([1, 2], ['1', '2']))
+        self.assertFalse(f.has_changed([2, 1], ['1', '2']))
+        self.assertTrue(f.has_changed([1, 2], ['1']))
+        self.assertTrue(f.has_changed([1, 2], ['1', '3']))
 
     # TypedMultipleChoiceField ############################################################
     # TypedMultipleChoiceField is just like MultipleChoiceField, except that coerced types
@@ -1131,7 +1173,7 @@ class FieldsTests(SimpleTestCase):
     def test_typedmultiplechoicefield_has_changed(self):
         # has_changed should not trigger required validation
         f = TypedMultipleChoiceField(choices=[(1, "+1"), (-1, "-1")], coerce=int, required=True)
-        self.assertFalse(f._has_changed(None, ''))
+        self.assertFalse(f.has_changed(None, ''))
 
     def test_typedmultiplechoicefield_special_coerce(self):
         """
@@ -1150,7 +1192,7 @@ class FieldsTests(SimpleTestCase):
             "'Select a valid choice. 3 is not one of the available choices.'",
             f.clean, ['3'])
 
-   # ComboField ##################################################################
+    # ComboField ##################################################################
 
     def test_combofield_1(self):
         f = ComboField(fields=[CharField(max_length=20), EmailField()])
@@ -1252,6 +1294,7 @@ class FieldsTests(SimpleTestCase):
         f.choices.sort()
         expected = [
             ('/tests/forms_tests/tests/filepath_test_files/.dot-file', '.dot-file'),
+            ('/tests/forms_tests/tests/filepath_test_files/1x1.png', '1x1.png'),
             ('/tests/forms_tests/tests/filepath_test_files/directory', 'directory'),
             ('/tests/forms_tests/tests/filepath_test_files/fake-image.jpg', 'fake-image.jpg'),
             ('/tests/forms_tests/tests/filepath_test_files/real-text-file.txt', 'real-text-file.txt'),
@@ -1295,7 +1338,7 @@ class FieldsTests(SimpleTestCase):
 
     def test_splitdatetimefield_changed(self):
         f = SplitDateTimeField(input_date_formats=['%d/%m/%Y'])
-        self.assertFalse(f._has_changed(['11/01/2012', '09:18:15'], ['11/01/2012', '09:18:15']))
-        self.assertTrue(f._has_changed(datetime.datetime(2008, 5, 6, 12, 40, 00), ['2008-05-06', '12:40:00']))
-        self.assertFalse(f._has_changed(datetime.datetime(2008, 5, 6, 12, 40, 00), ['06/05/2008', '12:40']))
-        self.assertTrue(f._has_changed(datetime.datetime(2008, 5, 6, 12, 40, 00), ['06/05/2008', '12:41']))
+        self.assertFalse(f.has_changed(['11/01/2012', '09:18:15'], ['11/01/2012', '09:18:15']))
+        self.assertTrue(f.has_changed(datetime.datetime(2008, 5, 6, 12, 40, 00), ['2008-05-06', '12:40:00']))
+        self.assertFalse(f.has_changed(datetime.datetime(2008, 5, 6, 12, 40, 00), ['06/05/2008', '12:40']))
+        self.assertTrue(f.has_changed(datetime.datetime(2008, 5, 6, 12, 40, 00), ['06/05/2008', '12:41']))

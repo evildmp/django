@@ -14,6 +14,7 @@ from django.core import signals
 from django.core.handlers import base
 from django.core.urlresolvers import set_script_prefix
 from django.utils import datastructures
+from django.utils.deprecation import RemovedInDjango19Warning
 from django.utils.encoding import force_str, force_text
 from django.utils.functional import cached_property
 from django.utils import six
@@ -91,7 +92,11 @@ class WSGIRequest(http.HttpRequest):
             path_info = '/'
         self.environ = environ
         self.path_info = path_info
-        self.path = '%s/%s' % (script_name.rstrip('/'), path_info.lstrip('/'))
+        # be careful to only replace the first slash in the path because of
+        # http://test/something and http://test//something being different as
+        # stated in http://www.ietf.org/rfc/rfc2396.txt
+        self.path = '%s/%s' % (script_name.rstrip('/'),
+                               path_info.replace('/', '', 1))
         self.META = environ
         self.META['PATH_INFO'] = path_info
         self.META['SCRIPT_NAME'] = script_name
@@ -118,7 +123,7 @@ class WSGIRequest(http.HttpRequest):
 
     def _get_request(self):
         warnings.warn('`request.REQUEST` is deprecated, use `request.GET` or '
-                      '`request.POST` instead.', PendingDeprecationWarning, 2)
+                      '`request.POST` instead.', RemovedInDjango19Warning, 2)
         if not hasattr(self, '_request'):
             self._request = datastructures.MergeDict(self.POST, self.GET)
         return self._request
@@ -162,7 +167,7 @@ class WSGIHandler(base.BaseHandler):
         if self._request_middleware is None:
             with self.initLock:
                 try:
-                    # Check that middleware is still uninitialised.
+                    # Check that middleware is still uninitialized.
                     if self._request_middleware is None:
                         self.load_middleware()
                 except:

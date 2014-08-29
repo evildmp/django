@@ -2,7 +2,6 @@ from importlib import import_module
 import inspect
 import os
 import re
-import warnings
 
 from django import template
 from django.apps import apps
@@ -22,11 +21,6 @@ from django.views.generic import TemplateView
 
 # Exclude methods starting with these strings from documentation
 MODEL_METHODS_EXCLUDE = ('_', 'add_', 'delete', 'save', 'set_')
-
-if getattr(settings, 'ADMIN_FOR', None):
-    warnings.warn('The ADMIN_FOR setting has been removed, you can remove '
-                  'this setting from your configuration.', DeprecationWarning,
-                  stacklevel=2)
 
 
 class BaseAdminDocsView(TemplateView):

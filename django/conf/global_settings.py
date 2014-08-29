@@ -50,6 +50,7 @@ LANGUAGE_CODE = 'en-us'
 LANGUAGES = (
     ('af', gettext_noop('Afrikaans')),
     ('ar', gettext_noop('Arabic')),
+    ('ast', gettext_noop('Asturian')),
     ('az', gettext_noop('Azerbaijani')),
     ('bg', gettext_noop('Bulgarian')),
     ('be', gettext_noop('Belarusian')),
@@ -85,6 +86,7 @@ LANGUAGES = (
     ('hu', gettext_noop('Hungarian')),
     ('ia', gettext_noop('Interlingua')),
     ('id', gettext_noop('Indonesian')),
+    ('io', gettext_noop('Ido')),
     ('is', gettext_noop('Icelandic')),
     ('it', gettext_noop('Italian')),
     ('ja', gettext_noop('Japanese')),
@@ -99,6 +101,7 @@ LANGUAGES = (
     ('mk', gettext_noop('Macedonian')),
     ('ml', gettext_noop('Malayalam')),
     ('mn', gettext_noop('Mongolian')),
+    ('mr', gettext_noop('Marathi')),
     ('my', gettext_noop('Burmese')),
     ('nb', gettext_noop('Norwegian Bokmal')),
     ('ne', gettext_noop('Nepali')),
@@ -140,7 +143,13 @@ LANGUAGES_BIDI = ("he", "ar", "fa", "ur")
 # to load the internationalization machinery.
 USE_I18N = True
 LOCALE_PATHS = ()
+
+# Settings for language cookie
 LANGUAGE_COOKIE_NAME = 'django_language'
+LANGUAGE_COOKIE_AGE = None
+LANGUAGE_COOKIE_DOMAIN = None
+LANGUAGE_COOKIE_PATH = '/'
+
 
 # If you set this to True, Django will format dates, numbers and calendars
 # according to user current locale.
@@ -161,9 +170,6 @@ FILE_CHARSET = 'utf-8'
 
 # Email address that error messages come from.
 SERVER_EMAIL = 'root@localhost'
-
-# Whether to send broken-link emails. Deprecated, must be removed in 1.8.
-SEND_BROKEN_LINK_EMAILS = False
 
 # Database connection info. If left empty, will default to the dummy backend.
 DATABASES = {}
@@ -255,11 +261,6 @@ ABSOLUTE_URL_OVERRIDES = {}
 # Tuple of strings representing allowed prefixes for the {% ssi %} tag.
 # Example: ('/home/html', '/var/www')
 ALLOWED_INCLUDE_ROOTS = ()
-
-# If this is a admin settings module, this should be a list of
-# settings modules (in the format 'foo.bar.baz') for which this admin
-# is an admin.
-ADMIN_FOR = ()
 
 # List of compiled regular expression objects representing URLs that need not
 # be reported by BrokenLinkEmailsMiddleware. Here are a few examples:
@@ -417,10 +418,6 @@ NUMBER_GROUPING = 0
 # Thousand separator symbol
 THOUSAND_SEPARATOR = ','
 
-# Do you want to manage transactions manually?
-# Hint: you really don't!
-TRANSACTIONS_MANAGED = False
-
 # The tablespaces to use for each model when not specified otherwise.
 DEFAULT_TABLESPACE = ''
 DEFAULT_INDEX_TABLESPACE = ''
@@ -455,12 +452,7 @@ SECURE_PROXY_SSL_HEADER = None
 # response phase the middleware will be applied in reverse order.
 MIDDLEWARE_CLASSES = (
     'django.middleware.common.CommonMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    # 'django.middleware.http.ConditionalGetMiddleware',
-    # 'django.middleware.gzip.GZipMiddleware',
 )
 
 ############
@@ -493,16 +485,6 @@ CACHES = {
 CACHE_MIDDLEWARE_KEY_PREFIX = ''
 CACHE_MIDDLEWARE_SECONDS = 600
 CACHE_MIDDLEWARE_ALIAS = 'default'
-
-####################
-# COMMENTS         #
-####################
-
-COMMENTS_ALLOW_PROFANITIES = False
-
-# The profanities that will trigger a validation error in
-# CommentDetailsForm.clean_comment. All of these should be in lowercase.
-PROFANITIES_LIST = ()
 
 ##################
 # AUTHENTICATION #
@@ -552,6 +534,7 @@ CSRF_FAILURE_VIEW = 'django.views.csrf.csrf_failure'
 
 # Settings for CSRF cookie.
 CSRF_COOKIE_NAME = 'csrftoken'
+CSRF_COOKIE_AGE = 60 * 60 * 24 * 7 * 52
 CSRF_COOKIE_DOMAIN = None
 CSRF_COOKIE_PATH = '/'
 CSRF_COOKIE_SECURE = False
@@ -587,6 +570,10 @@ DEFAULT_EXCEPTION_REPORTER_FILTER = 'django.views.debug.SafeExceptionReporterFil
 
 # The name of the class to use to run the test suite
 TEST_RUNNER = 'django.test.runner.DiscoverRunner'
+
+# Apps that don't need to be serialized at test database creation time
+# (only apps with migrations are to start with)
+TEST_NON_SERIALIZED_APPS = []
 
 ############
 # FIXTURES #

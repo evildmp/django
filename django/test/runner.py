@@ -1,12 +1,11 @@
 from importlib import import_module
 import os
-from optparse import make_option
 import unittest
 from unittest import TestSuite, defaultTestLoader
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import setup_test_environment, teardown_test_environment
 
 
@@ -18,18 +17,10 @@ class DiscoverRunner(object):
     test_suite = TestSuite
     test_runner = unittest.TextTestRunner
     test_loader = defaultTestLoader
-    reorder_by = (TestCase, )
-    option_list = (
-        make_option('-t', '--top-level-directory',
-            action='store', dest='top_level', default=None,
-            help='Top level of project for unittest discovery.'),
-        make_option('-p', '--pattern', action='store', dest='pattern',
-            default="test*.py",
-            help='The test matching pattern. Defaults to test*.py.'),
-    )
+    reorder_by = (TestCase, SimpleTestCase)
 
     def __init__(self, pattern=None, top_level=None,
-                 verbosity=1, interactive=True, failfast=False,
+                 verbosity=1, interactive=True, failfast=False, keepdb=False,
                  **kwargs):
 
         self.pattern = pattern
@@ -38,6 +29,19 @@ class DiscoverRunner(object):
         self.verbosity = verbosity
         self.interactive = interactive
         self.failfast = failfast
+        self.keepdb = keepdb
+
+    @classmethod
+    def add_arguments(cls, parser):
+        parser.add_argument('-t', '--top-level-directory',
+            action='store', dest='top_level', default=None,
+            help='Top level of project for unittest discovery.')
+        parser.add_argument('-p', '--pattern', action='store', dest='pattern',
+            default="test*.py",
+            help='The test matching pattern. Defaults to test*.py.')
+        parser.add_argument('-k', '--keepdb', action='store_true', dest='keepdb',
+            default=False,
+            help='Preserve the test DB between runs. Defaults to False')
 
     def setup_test_environment(self, **kwargs):
         setup_test_environment()
@@ -106,7 +110,7 @@ class DiscoverRunner(object):
         return reorder_suite(suite, self.reorder_by)
 
     def setup_databases(self, **kwargs):
-        return setup_databases(self.verbosity, self.interactive, **kwargs)
+        return setup_databases(self.verbosity, self.interactive, self.keepdb, **kwargs)
 
     def run_suite(self, suite, **kwargs):
         return self.test_runner(
@@ -121,7 +125,7 @@ class DiscoverRunner(object):
         old_names, mirrors = old_config
         for connection, old_name, destroy in old_names:
             if destroy:
-                connection.creation.destroy_test_db(old_name, self.verbosity)
+                connection.creation.destroy_test_db(old_name, self.verbosity, self.keepdb)
 
     def teardown_test_environment(self, **kwargs):
         unittest.removeHandler()
@@ -170,7 +174,7 @@ def is_discoverable(label):
 def dependency_ordered(test_databases, dependencies):
     """
     Reorder test_databases into an order that honors the dependencies
-    described in TEST_DEPENDENCIES.
+    described in TEST[DEPENDENCIES].
     """
     ordered_test_databases = []
     resolved_databases = set()
@@ -178,7 +182,7 @@ def dependency_ordered(test_databases, dependencies):
     # Maps db signature to dependencies of all it's aliases
     dependencies_map = {}
 
-    # sanity check - no DB can depend on it's own alias
+    # sanity check - no DB can depend on its own alias
     for sig, (_, aliases) in test_databases:
         all_deps = set()
         for alias in aliases:
@@ -204,7 +208,7 @@ def dependency_ordered(test_databases, dependencies):
 
         if not changed:
             raise ImproperlyConfigured(
-                "Circular dependency in TEST_DEPENDENCIES")
+                "Circular dependency in TEST[DEPENDENCIES]")
         test_databases = deferred
     return ordered_test_databases
 
@@ -250,7 +254,7 @@ def partition_suite(suite, classes, bins):
                 bins[-1].addTest(test)
 
 
-def setup_databases(verbosity, interactive, **kwargs):
+def setup_databases(verbosity, interactive, keepdb=False, **kwargs):
     from django.db import connections, DEFAULT_DB_ALIAS
 
     # First pass -- work out which databases actually need to be created,
@@ -261,11 +265,11 @@ def setup_databases(verbosity, interactive, **kwargs):
     default_sig = connections[DEFAULT_DB_ALIAS].creation.test_db_signature()
     for alias in connections:
         connection = connections[alias]
-        if connection.settings_dict['TEST_MIRROR']:
+        test_settings = connection.settings_dict['TEST']
+        if test_settings['MIRROR']:
             # If the database is marked as a test mirror, save
             # the alias.
-            mirrored_aliases[alias] = (
-                connection.settings_dict['TEST_MIRROR'])
+            mirrored_aliases[alias] = test_settings['MIRROR']
         else:
             # Store a tuple with DB parameters that uniquely identify it.
             # If we have two aliases with the same values for that tuple,
@@ -276,13 +280,11 @@ def setup_databases(verbosity, interactive, **kwargs):
             )
             item[1].add(alias)
 
-            if 'TEST_DEPENDENCIES' in connection.settings_dict:
-                dependencies[alias] = (
-                    connection.settings_dict['TEST_DEPENDENCIES'])
+            if 'DEPENDENCIES' in test_settings:
+                dependencies[alias] = test_settings['DEPENDENCIES']
             else:
                 if alias != DEFAULT_DB_ALIAS and connection.creation.test_db_signature() != default_sig:
-                    dependencies[alias] = connection.settings_dict.get(
-                        'TEST_DEPENDENCIES', [DEFAULT_DB_ALIAS])
+                    dependencies[alias] = test_settings.get('DEPENDENCIES', [DEFAULT_DB_ALIAS])
 
     # Second pass -- actually create the databases.
     old_names = []
@@ -296,7 +298,11 @@ def setup_databases(verbosity, interactive, **kwargs):
             connection = connections[alias]
             if test_db_name is None:
                 test_db_name = connection.creation.create_test_db(
-                    verbosity, autoclobber=not interactive)
+                    verbosity,
+                    autoclobber=not interactive,
+                    keepdb=keepdb,
+                    serialize=connection.settings_dict.get("TEST_SERIALIZE", True),
+                )
                 destroy = True
             else:
                 connection.settings_dict['NAME'] = test_db_name

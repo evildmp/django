@@ -96,11 +96,6 @@ class OneToOneRegressionTests(TestCase):
         r = Restaurant(place=p)
         self.assertTrue(r.place is p)
 
-        # Creation using keyword argument and unsaved related instance (#8070).
-        p = Place()
-        r = Restaurant(place=p)
-        self.assertTrue(r.place is p)
-
         # Creation using attname keyword argument and an id will cause the related
         # object to be fetched.
         p = Place.objects.get(name="Demon Dogs")
@@ -229,7 +224,7 @@ class OneToOneRegressionTests(TestCase):
 
         # Several instances of the origin are only possible if database allows
         # inserting multiple NULL rows for a unique constraint
-        if connection.features.ignores_nulls_in_unique_constraints:
+        if connection.features.supports_nullable_unique_constraints:
             UndergroundBar.objects.create()
 
             # When there are several instances of the origin

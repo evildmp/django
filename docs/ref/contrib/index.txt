@@ -24,7 +24,6 @@ those packages have.
 
    admin/index
    auth
-   comments/index
    contenttypes
    csrf
    flatpages
@@ -32,6 +31,7 @@ those packages have.
    gis/index
    humanize
    messages
+   postgres/index
    redirects
    sitemaps
    sites
@@ -54,11 +54,6 @@ auth
 Django's authentication framework.
 
 See :doc:`/topics/auth/index`.
-
-comments
-========
-
-A simple yet flexible comments system. See :doc:`/ref/contrib/comments/index`.
 
 contenttypes
 ============
@@ -127,6 +122,13 @@ A framework for storing and retrieving temporary cookie- or session-based
 messages
 
 See the :doc:`messages documentation </ref/contrib/messages>`.
+
+postgres
+========
+
+A collection of PostgreSQL specific features.
+
+See the :doc:`contrib.postgres documentation </ref/contrib/postgres/index>`.
 
 redirects
 =========

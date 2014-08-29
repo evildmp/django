@@ -167,7 +167,7 @@ class SimpleTemplateResponseTest(TestCase):
         self.assertEqual(unpickled_response['content-type'], response['content-type'])
         self.assertEqual(unpickled_response.status_code, response.status_code)
 
-        # ...and the unpickled reponse doesn't have the
+        # ...and the unpickled response doesn't have the
         # template-related attributes, so it can't be re-rendered
         template_attrs = ('template_name', 'context_data', '_post_render_callbacks')
         for attr in template_attrs:
@@ -259,7 +259,8 @@ class TemplateResponseTest(TestCase):
             'first/test.html', {
                 'value': 123,
                 'fn': datetime.now,
-            })
+            }
+        )
         self.assertRaises(ContentNotRenderedError,
                           pickle.dumps, response)
 
@@ -272,7 +273,7 @@ class TemplateResponseTest(TestCase):
         self.assertEqual(unpickled_response['content-type'], response['content-type'])
         self.assertEqual(unpickled_response.status_code, response.status_code)
 
-        # ...and the unpickled reponse doesn't have the
+        # ...and the unpickled response doesn't have the
         # template-related attributes, so it can't be re-rendered
         template_attrs = ('template_name', 'context_data',
             '_post_render_callbacks', '_request', '_current_app')
@@ -301,10 +302,10 @@ class TemplateResponseTest(TestCase):
 @override_settings(
     MIDDLEWARE_CLASSES=list(settings.MIDDLEWARE_CLASSES) + [
         'template_tests.test_response.CustomURLConfMiddleware'
-    ]
+    ],
+    ROOT_URLCONF='template_tests.urls',
 )
 class CustomURLConfTest(TestCase):
-    urls = 'template_tests.urls'
 
     def test_custom_urlconf(self):
         response = self.client.get('/template_response_view/')
@@ -317,10 +318,10 @@ class CustomURLConfTest(TestCase):
     MIDDLEWARE_CLASSES=list(settings.MIDDLEWARE_CLASSES) + [
         'django.middleware.cache.FetchFromCacheMiddleware',
         'django.middleware.cache.UpdateCacheMiddleware',
-    ]
+    ],
+    ROOT_URLCONF='template_tests.alternate_urls',
 )
 class CacheMiddlewareTest(TestCase):
-    urls = 'template_tests.alternate_urls'
 
     def test_middleware_caching(self):
         response = self.client.get('/template_response_view/')

@@ -2,16 +2,15 @@ import os
 import tempfile
 import warnings
 
-from django.core.exceptions import ImproperlyConfigured
-
 try:
-    from django.utils.image import Image
-except ImproperlyConfigured:
+    from PIL import Image
+except ImportError:
     Image = None
 
 from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.db.models.fields.files import ImageFieldFile, ImageField
+from django.utils import six
 
 
 class Foo(models.Model):
@@ -45,17 +44,60 @@ class Whiz(models.Model):
     c = models.IntegerField(choices=CHOICES, null=True)
 
 
+class Counter(six.Iterator):
+    def __init__(self):
+        self.n = 1
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.n > 5:
+            raise StopIteration
+        else:
+            self.n += 1
+            return (self.n, 'val-' + str(self.n))
+
+
+class WhizIter(models.Model):
+    c = models.IntegerField(choices=Counter(), null=True)
+
+
+class WhizIterEmpty(models.Model):
+    c = models.CharField(choices=(x for x in []), blank=True, max_length=1)
+
+
 class BigD(models.Model):
     d = models.DecimalField(max_digits=38, decimal_places=30)
+
+
+class FloatModel(models.Model):
+    size = models.FloatField()
 
 
 class BigS(models.Model):
     s = models.SlugField(max_length=255)
 
 
-class BigInt(models.Model):
+class SmallIntegerModel(models.Model):
+    value = models.SmallIntegerField()
+
+
+class IntegerModel(models.Model):
+    value = models.IntegerField()
+
+
+class BigIntegerModel(models.Model):
     value = models.BigIntegerField()
     null_value = models.BigIntegerField(null=True, blank=True)
+
+
+class PositiveSmallIntegerModel(models.Model):
+    value = models.PositiveSmallIntegerField()
+
+
+class PositiveIntegerModel(models.Model):
+    value = models.PositiveIntegerField()
 
 
 class Post(models.Model):
@@ -72,12 +114,18 @@ class BooleanModel(models.Model):
     string = models.CharField(max_length=10, default='abc')
 
 
+class DateTimeModel(models.Model):
+    d = models.DateField()
+    dt = models.DateTimeField()
+    t = models.TimeField()
+
+
 class PrimaryKeyCharModel(models.Model):
     string = models.CharField(max_length=10, primary_key=True)
 
 
 class FksToBooleans(models.Model):
-    """Model wih FKs to models with {Null,}BooleanField's, #15040"""
+    """Model with FKs to models with {Null,}BooleanField's, #15040"""
     bf = models.ForeignKey(BooleanModel)
     nbf = models.ForeignKey(NullBooleanModel)
 
@@ -104,7 +152,7 @@ class VerboseNameField(models.Model):
     field9 = models.FileField("verbose field9", upload_to="unused")
     field10 = models.FilePathField("verbose field10")
     field11 = models.FloatField("verbose field11")
-    # Don't want to depend on Pillow/PIL in this test
+    # Don't want to depend on Pillow in this test
     #field_image = models.ImageField("verbose field")
     field12 = models.IntegerField("verbose field12")
     with warnings.catch_warnings(record=True) as w:
@@ -121,10 +169,20 @@ class VerboseNameField(models.Model):
     field22 = models.URLField("verbose field22")
 
 
-# This model isn't used in any test, just here to ensure it validates successfully.
+###############################################################################
+# These models aren't used in any test, just here to ensure they validate
+# successfully.
+
 # See ticket #16570.
 class DecimalLessThanOne(models.Model):
     d = models.DecimalField(max_digits=3, decimal_places=3)
+
+
+# See ticket #18389.
+class FieldClassAttributeModel(models.Model):
+    field_class = models.CharField
+
+###############################################################################
 
 
 class DataModel(models.Model):
@@ -141,7 +199,7 @@ class Document(models.Model):
 ###############################################################################
 # ImageField
 
-# If Pillow/PIL available, do these tests.
+# If Pillow available, do these tests.
 if Image:
     class TestImageFieldFile(ImageFieldFile):
         """
@@ -160,7 +218,7 @@ if Image:
         attr_class = TestImageFieldFile
 
     # Set up a temp directory for file storage.
-    temp_storage_dir = tempfile.mkdtemp()
+    temp_storage_dir = tempfile.mkdtemp(dir=os.environ['DJANGO_TEST_TEMP_DIR'])
     temp_storage = FileSystemStorage(temp_storage_dir)
     temp_upload_to_dir = os.path.join(temp_storage.location, 'tests')
 

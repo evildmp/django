@@ -4,12 +4,14 @@ from django.conf import settings
 from django.core.exceptions import FieldError
 from django.db.backends.utils import truncate_name
 from django.db.models.constants import LOOKUP_SEP
+from django.db.models.expressions import ExpressionNode
 from django.db.models.query_utils import select_related_descend, QueryWrapper
 from django.db.models.sql.constants import (CURSOR, SINGLE, MULTI, NO_RESULTS,
         ORDER_DIR, GET_ITERATOR_CHUNK_SIZE, SelectInfo)
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
+from django.db.transaction import TransactionManagementError
 from django.db.utils import DatabaseError
 from django.utils import six
 from django.utils.six.moves import zip
@@ -94,7 +96,7 @@ class SQLCompiler(object):
         # However we do not want to get rid of stuff done in pre_sql_setup(),
         # as the pre_sql_setup will modify query state in a way that forbids
         # another run of it.
-        self.refcounts_before = self.query.alias_refcount.copy()
+        refcounts_before = self.query.alias_refcount.copy()
         out_cols, s_params = self.get_columns(with_col_aliases)
         ordering, o_params, ordering_group_by = self.get_ordering()
 
@@ -115,7 +117,7 @@ class SQLCompiler(object):
 
         if self.query.distinct:
             result.append(self.connection.ops.distinct_sql(distinct_fields))
-        params.extend(o_params)
+
         result.append(', '.join(out_cols + self.ordering_aliases))
         params.extend(s_params)
         params.extend(self.ordering_params)
@@ -144,6 +146,7 @@ class SQLCompiler(object):
 
         if ordering:
             result.append('ORDER BY %s' % ', '.join(ordering))
+            params.extend(o_params)
 
         if with_limits:
             if self.query.high_mark is not None:
@@ -156,6 +159,9 @@ class SQLCompiler(object):
                 result.append('OFFSET %d' % self.query.low_mark)
 
         if self.query.select_for_update and self.connection.features.has_select_for_update:
+            if self.connection.get_autocommit():
+                raise TransactionManagementError("select_for_update cannot be used outside of a transaction.")
+
             # If we've been asked for a NOWAIT query but the backend does not support it,
             # raise a DatabaseError otherwise we could get an unexpected deadlock.
             nowait = self.query.select_for_update_nowait
@@ -164,7 +170,7 @@ class SQLCompiler(object):
             result.append(self.connection.ops.for_update_sql(nowait=nowait))
 
         # Finally do cleanup - get rid of the joins we created above.
-        self.query.reset_refcounts(self.refcounts_before)
+        self.query.reset_refcounts(refcounts_before)
 
         return ' '.join(result), tuple(params)
 
@@ -459,8 +465,9 @@ class SQLCompiler(object):
         field, targets, alias, joins, path, opts = self._setup_joins(pieces, opts, alias)
 
         # If we get to this point and the field is a relation to another model,
-        # append the default ordering for that model.
-        if field.rel and path and opts.ordering:
+        # append the default ordering for that model unless the attribute name
+        # of the field is specified.
+        if field.rel and path and opts.ordering and name != field.attname:
             # Firstly, avoid infinite loops.
             if not already_seen:
                 already_seen = set()
@@ -540,7 +547,7 @@ class SQLCompiler(object):
                 result.append('%s%s%s' % (connector, qn(name), alias_str))
             first = False
         for t in self.query.extra_tables:
-            alias, unused = self.query.table_alias(t)
+            alias, _ = self.query.table_alias(t)
             # Only add the alias if it's not already present (the table_alias()
             # calls increments the refcount, so an alias refcount of one means
             # this is the only reference.
@@ -563,7 +570,7 @@ class SQLCompiler(object):
             if (len(self.query.get_meta().concrete_fields) == len(self.query.select)
                     and self.connection.features.allows_group_by_pk):
                 self.query.group_by = [
-                    (self.query.get_meta().db_table, self.query.get_meta().pk.column)
+                    (self.query.get_initial_alias(), self.query.get_meta().pk.column)
                 ]
                 select_cols = []
             seen = set()
@@ -890,7 +897,7 @@ class SQLInsertCompiler(SQLCompiler):
             col = "%s.%s" % (qn(opts.db_table), qn(opts.pk.column))
             result.append("VALUES (%s)" % ", ".join(placeholders[0]))
             r_fmt, r_params = self.connection.ops.return_insert_id()
-            # Skip empty r_fmt to allow subclasses to customize behaviour for
+            # Skip empty r_fmt to allow subclasses to customize behavior for
             # 3rd party backends. Refs #19096.
             if r_fmt:
                 result.append(r_fmt % col)
@@ -951,7 +958,13 @@ class SQLUpdateCompiler(SQLCompiler):
         values, update_params = [], []
         for field, model, val in self.query.values:
             if hasattr(val, 'prepare_database_save'):
-                val = val.prepare_database_save(field)
+                if field.rel or isinstance(val, ExpressionNode):
+                    val = val.prepare_database_save(field)
+                else:
+                    raise TypeError("Database is trying to update a relational field "
+                                    "of type %s with a value of type %s. Make sure "
+                                    "you are setting the correct relations" %
+                                    (field.__class__.__name__, val.__class__.__name__))
             else:
                 val = field.get_db_prep_save(val, connection=self.connection)
 
@@ -1121,7 +1134,7 @@ class SQLDateTimeCompiler(SQLCompiler):
                     datetime = self.resolve_columns(row, fields)[offset]
                 elif needs_string_cast:
                     datetime = typecast_timestamp(str(datetime))
-                # Datetimes are artifically returned in UTC on databases that
+                # Datetimes are artificially returned in UTC on databases that
                 # don't support time zone. Restore the zone used in the query.
                 if settings.USE_TZ:
                     if datetime is None:

@@ -1,3 +1,5 @@
+from __future__ import unicode_literals
+
 from django.utils.datastructures import OrderedSet
 from django.db.migrations.state import ProjectState
 
@@ -33,11 +35,11 @@ class MigrationGraph(object):
     def add_node(self, node, implementation):
         self.nodes[node] = implementation
 
-    def add_dependency(self, child, parent):
+    def add_dependency(self, migration, child, parent):
         if child not in self.nodes:
-            raise KeyError("Dependency references nonexistent child node %r" % (child,))
+            raise KeyError("Migration %s dependencies references nonexistent child node %r" % (migration, child))
         if parent not in self.nodes:
-            raise KeyError("Dependency references nonexistent parent node %r" % (parent,))
+            raise KeyError("Migration %s dependencies references nonexistent parent node %r" % (migration, parent))
         self.dependencies.setdefault(child, set()).add(parent)
         self.dependents.setdefault(parent, set()).add(child)
 
@@ -72,7 +74,7 @@ class MigrationGraph(object):
         for node in self.nodes:
             if not any(key[0] == node[0] for key in self.dependencies.get(node, set())) and (not app or app == node[0]):
                 roots.add(node)
-        return roots
+        return sorted(roots)
 
     def leaf_nodes(self, app=None):
         """
@@ -86,7 +88,7 @@ class MigrationGraph(object):
         for node in self.nodes:
             if not any(key[0] == node[0] for key in self.dependents.get(node, set())) and (not app or app == node[0]):
                 leaves.add(node)
-        return leaves
+        return sorted(leaves)
 
     def dfs(self, start, get_children):
         """
@@ -121,7 +123,7 @@ class MigrationGraph(object):
     def __str__(self):
         return "Graph: %s nodes, %s edges" % (len(self.nodes), sum(len(x) for x in self.dependencies.values()))
 
-    def project_state(self, nodes=None, at_end=True):
+    def make_state(self, nodes=None, at_end=True, real_apps=None):
         """
         Given a migration node or nodes, returns a complete ProjectState for it.
         If at_end is False, returns the state before the migration has run.
@@ -140,7 +142,7 @@ class MigrationGraph(object):
                     if not at_end and migration in nodes:
                         continue
                     plan.append(migration)
-        project_state = ProjectState()
+        project_state = ProjectState(real_apps=real_apps)
         for node in plan:
             project_state = self.nodes[node].mutate_state(project_state)
         return project_state

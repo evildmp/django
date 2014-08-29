@@ -1,36 +1,37 @@
 import sys
 import os
 import operator
-from optparse import make_option
 
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
-from django.db import connections, DEFAULT_DB_ALIAS, migrations
-from django.db.migrations.migration import Migration
+from django.db.migrations import Migration
 from django.db.migrations.loader import MigrationLoader
 from django.db.migrations.autodetector import MigrationAutodetector
 from django.db.migrations.questioner import MigrationQuestioner, InteractiveMigrationQuestioner
 from django.db.migrations.state import ProjectState
 from django.db.migrations.writer import MigrationWriter
+from django.utils.six import iteritems
 from django.utils.six.moves import reduce
 
 
 class Command(BaseCommand):
-    option_list = BaseCommand.option_list + (
-        make_option('--dry-run', action='store_true', dest='dry_run', default=False,
-            help="Just show what migrations would be made; don't actually write them."),
-        make_option('--merge', action='store_true', dest='merge', default=False,
-            help="Enable fixing of migration conflicts."),
-        make_option('--empty', action='store_true', dest='empty', default=False,
-            help="Create an empty migration."),
-    )
-
     help = "Creates new migration(s) for apps."
-    usage_str = "Usage: ./manage.py makemigrations [--dry-run] [app [app ...]]"
+
+    def add_arguments(self, parser):
+        parser.add_argument('args', metavar='app_label', nargs='*',
+            help='Specify the app label(s) to create migrations for.')
+        parser.add_argument('--dry-run', action='store_true', dest='dry_run', default=False,
+            help="Just show what migrations would be made; don't actually write them.")
+        parser.add_argument('--merge', action='store_true', dest='merge', default=False,
+            help="Enable fixing of migration conflicts.")
+        parser.add_argument('--empty', action='store_true', dest='empty', default=False,
+            help="Create an empty migration.")
+        parser.add_argument('--noinput', action='store_false', dest='interactive', default=True,
+            help='Tells Django to NOT prompt the user for input of any kind.')
 
     def handle(self, *app_labels, **options):
 
-        self.verbosity = int(options.get('verbosity'))
+        self.verbosity = options.get('verbosity')
         self.interactive = options.get('interactive')
         self.dry_run = options.get('dry_run', False)
         self.merge = options.get('merge', False)
@@ -49,15 +50,21 @@ class Command(BaseCommand):
                 self.stderr.write("App '%s' could not be found. Is it in INSTALLED_APPS?" % app_label)
             sys.exit(2)
 
-        # Load the current graph state. Takes a connection, but it's not used
-        # (makemigrations doesn't look at the database state).
-        # Also make sure the graph is built without unmigrated apps shoehorned in.
-        loader = MigrationLoader(connections[DEFAULT_DB_ALIAS])
-        loader.build_graph(ignore_unmigrated=True)
+        # Load the current graph state. Pass in None for the connection so
+        # the loader doesn't try to resolve replaced migrations from DB.
+        loader = MigrationLoader(None, ignore_no_migrations=True)
 
         # Before anything else, see if there's conflicting apps and drop out
         # hard if there are any and they don't want to merge
         conflicts = loader.detect_conflicts()
+
+        # If app_labels is specified, filter out conflicting migrations for unspecified apps
+        if app_labels:
+            conflicts = dict(
+                (app_label, conflict) for app_label, conflict in iteritems(conflicts)
+                if app_label in app_labels
+            )
+
         if conflicts and not self.merge:
             name_str = "; ".join(
                 "%s in %s" % (", ".join(names), app)
@@ -77,9 +84,9 @@ class Command(BaseCommand):
 
         # Set up autodetector
         autodetector = MigrationAutodetector(
-            loader.graph.project_state(),
+            loader.project_state(),
             ProjectState.from_apps(apps),
-            InteractiveMigrationQuestioner(specified_apps=app_labels),
+            InteractiveMigrationQuestioner(specified_apps=app_labels, dry_run=self.dry_run),
         )
 
         # If they want to make an empty migration, make one for each app
@@ -96,7 +103,11 @@ class Command(BaseCommand):
             return
 
         # Detect changes
-        changes = autodetector.changes(graph=loader.graph, trim_to_apps=app_labels or None)
+        changes = autodetector.changes(
+            graph=loader.graph,
+            trim_to_apps=app_labels or None,
+            convert_apps=app_labels or None,
+        )
 
         # No changes? Tell them.
         if not changes and self.verbosity >= 1:
@@ -125,8 +136,8 @@ class Command(BaseCommand):
                     self.stdout.write("  %s:\n" % (self.style.MIGRATE_LABEL(writer.filename),))
                     for operation in migration.operations:
                         self.stdout.write("    - %s\n" % operation.describe())
-                # Write it
                 if not self.dry_run:
+                    # Write the migrations file to the disk.
                     migrations_directory = os.path.dirname(writer.path)
                     if not directory_created.get(app_label, False):
                         if not os.path.isdir(migrations_directory):
@@ -139,6 +150,12 @@ class Command(BaseCommand):
                     migration_string = writer.as_string()
                     with open(writer.path, "wb") as fh:
                         fh.write(migration_string)
+                elif self.verbosity == 3:
+                    # Alternatively, makemigrations --dry-run --verbosity 3
+                    # will output the migrations to stdout rather than saving
+                    # the file to the disk.
+                    self.stdout.write(self.style.MIGRATE_HEADING("Full migrations file '%s':" % writer.filename) + "\n")
+                    self.stdout.write("%s\n" % writer.as_string())
 
     def handle_merge(self, loader, conflicts):
         """
@@ -148,7 +165,7 @@ class Command(BaseCommand):
         if self.interactive:
             questioner = InteractiveMigrationQuestioner()
         else:
-            questioner = MigrationQuestioner()
+            questioner = MigrationQuestioner(defaults={'ask_merge': True})
         for app_label, migration_names in conflicts.items():
             # Grab out the migrations in question, and work out their
             # common ancestor.
@@ -195,7 +212,7 @@ class Command(BaseCommand):
                     biggest_number = max([x for x in numbers if x is not None])
                 except ValueError:
                     biggest_number = 1
-                subclass = type("Migration", (migrations.Migration, ), {
+                subclass = type("Migration", (Migration, ), {
                     "dependencies": [(app_label, migration.name) for migration in merge_migrations],
                 })
                 new_migration = subclass("%04i_merge" % (biggest_number + 1), app_label)

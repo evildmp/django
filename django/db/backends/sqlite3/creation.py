@@ -47,13 +47,15 @@ class DatabaseCreation(BaseDatabaseCreation):
         return []
 
     def _get_test_db_name(self):
-        test_database_name = self.connection.settings_dict['TEST_NAME']
+        test_database_name = self.connection.settings_dict['TEST']['NAME']
         if test_database_name and test_database_name != ':memory:':
             return test_database_name
         return ':memory:'
 
-    def _create_test_db(self, verbosity, autoclobber):
+    def _create_test_db(self, verbosity, autoclobber, keepdb=False):
         test_database_name = self._get_test_db_name()
+        if keepdb:
+            return test_database_name
         if test_database_name != ':memory:':
             # Erase the old test database
             if verbosity >= 1:
@@ -83,7 +85,7 @@ class DatabaseCreation(BaseDatabaseCreation):
 
         This takes into account the special cases of ":memory:" and "" for
         SQLite since the databases will be distinct despite having the same
-        TEST_NAME. See http://www.sqlite.org/inmemorydb.html
+        TEST NAME. See http://www.sqlite.org/inmemorydb.html
         """
         test_dbname = self._get_test_db_name()
         sig = [self.connection.settings_dict['NAME']]

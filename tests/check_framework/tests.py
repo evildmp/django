@@ -10,6 +10,7 @@ from django.core import checks
 from django.core.checks import Error, Warning
 from django.core.checks.registry import CheckRegistry
 from django.core.checks.compatibility.django_1_6_0 import check_1_6_compatibility
+from django.core.checks.compatibility.django_1_7_0 import check_1_7_compatibility
 from django.core.management.base import CommandError
 from django.core.management import call_command
 from django.db.models.fields import NOT_PROVIDED
@@ -110,7 +111,7 @@ class Django_1_6_0_CompatibilityChecks(TestCase):
                     hint=("Django 1.6 introduced a new default test runner. It looks like "
                           "this project was generated using Django 1.5 or earlier. You should "
                           "ensure your tests are all running & behaving as expected. See "
-                          "https://docs.djangoproject.com/en/dev/releases/1.6/#discovery-of-tests-in-any-test-module "
+                          "https://docs.djangoproject.com/en/dev/releases/1.6/#new-test-runner "
                           "for more information."),
                     obj=None,
                     id='1_6.W001',
@@ -134,7 +135,7 @@ class Django_1_6_0_CompatibilityChecks(TestCase):
                 errors = check_1_6_compatibility()
                 expected = [
                     checks.Warning(
-                        'BooleanField does not have a default value. ',
+                        'BooleanField does not have a default value.',
                         hint=('Django 1.6 changed the default value of BooleanField from False to None. '
                               'See https://docs.djangoproject.com/en/1.6/ref/models/fields/#booleanfield '
                               'for more information.'),
@@ -146,6 +147,40 @@ class Django_1_6_0_CompatibilityChecks(TestCase):
             finally:
                 # Restore the ``default``
                 boolean_field.default = old_default
+
+
+class Django_1_7_0_CompatibilityChecks(TestCase):
+
+    @override_settings(MIDDLEWARE_CLASSES=('django.contrib.sessions.middleware.SessionMiddleware',))
+    def test_middleware_classes_overridden(self):
+        errors = check_1_7_compatibility()
+        self.assertEqual(errors, [])
+
+    def test_middleware_classes_not_set_explicitly(self):
+        # If MIDDLEWARE_CLASSES was set explicitly, temporarily pretend it wasn't
+        middleware_classes_overridden = False
+        if 'MIDDLEWARE_CLASSES' in settings._wrapped._explicit_settings:
+            middleware_classes_overridden = True
+            settings._wrapped._explicit_settings.remove('MIDDLEWARE_CLASSES')
+        try:
+            errors = check_1_7_compatibility()
+            expected = [
+                checks.Warning(
+                    "MIDDLEWARE_CLASSES is not set.",
+                    hint=("Django 1.7 changed the global defaults for the MIDDLEWARE_CLASSES. "
+                          "django.contrib.sessions.middleware.SessionMiddleware, "
+                          "django.contrib.auth.middleware.AuthenticationMiddleware, and "
+                          "django.contrib.messages.middleware.MessageMiddleware were removed from the defaults. "
+                          "If your project needs these middleware then you should configure this setting."),
+                    obj=None,
+                    id='1_7.W001',
+                )
+            ]
+            self.assertEqual(errors, expected)
+        finally:
+            # Restore settings value
+            if middleware_classes_overridden:
+                settings._wrapped._explicit_settings.add('MIDDLEWARE_CLASSES')
 
 
 def simple_system_check(**kwargs):
@@ -193,6 +228,16 @@ class CheckCommandTests(TestCase):
     @override_system_checks([simple_system_check, tagged_system_check])
     def test_invalid_tag(self):
         self.assertRaises(CommandError, call_command, 'check', tags=['missingtag'])
+
+    @override_system_checks([simple_system_check])
+    def test_list_tags_empty(self):
+        call_command('check', list_tags=True)
+        self.assertEqual('\n', sys.stdout.getvalue())
+
+    @override_system_checks([tagged_system_check])
+    def test_list_tags(self):
+        call_command('check', list_tags=True)
+        self.assertEqual('simpletag\n', sys.stdout.getvalue())
 
 
 def custom_error_system_check(app_configs, **kwargs):

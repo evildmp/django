@@ -384,3 +384,88 @@ class CsrfViewMiddlewareTest(TestCase):
         finally:
             logger.removeHandler(test_handler)
             logger.setLevel(old_log_level)
+
+    def test_csrf_cookie_age(self):
+        """
+        Test to verify CSRF cookie age can be set using
+        settings.CSRF_COOKIE_AGE.
+        """
+        req = self._get_GET_no_csrf_cookie_request()
+
+        MAX_AGE = 123
+        with self.settings(CSRF_COOKIE_NAME='csrfcookie',
+                           CSRF_COOKIE_DOMAIN='.example.com',
+                           CSRF_COOKIE_AGE=MAX_AGE,
+                           CSRF_COOKIE_PATH='/test/',
+                           CSRF_COOKIE_SECURE=True,
+                           CSRF_COOKIE_HTTPONLY=True):
+            # token_view calls get_token() indirectly
+            CsrfViewMiddleware().process_view(req, token_view, (), {})
+            resp = token_view(req)
+
+            resp2 = CsrfViewMiddleware().process_response(req, resp)
+            max_age = resp2.cookies.get('csrfcookie').get('max-age')
+            self.assertEqual(max_age, MAX_AGE)
+
+    def test_csrf_cookie_age_none(self):
+        """
+        Test to verify CSRF cookie age does not have max age set and therefore
+        uses session-based cookies.
+        """
+        req = self._get_GET_no_csrf_cookie_request()
+
+        MAX_AGE = None
+        with self.settings(CSRF_COOKIE_NAME='csrfcookie',
+                           CSRF_COOKIE_DOMAIN='.example.com',
+                           CSRF_COOKIE_AGE=MAX_AGE,
+                           CSRF_COOKIE_PATH='/test/',
+                           CSRF_COOKIE_SECURE=True,
+                           CSRF_COOKIE_HTTPONLY=True):
+            # token_view calls get_token() indirectly
+            CsrfViewMiddleware().process_view(req, token_view, (), {})
+            resp = token_view(req)
+
+            resp2 = CsrfViewMiddleware().process_response(req, resp)
+            max_age = resp2.cookies.get('csrfcookie').get('max-age')
+            self.assertEqual(max_age, '')
+
+    def test_post_data_read_failure(self):
+        """
+        #20128 -- IOErrors during POST data reading should be caught and
+        treated as if the POST data wasn't there.
+        """
+        class CsrfPostRequest(HttpRequest):
+            """
+            HttpRequest that can raise an IOError when accessing POST data
+            """
+            def __init__(self, token, raise_error):
+                super(CsrfPostRequest, self).__init__()
+                self.method = 'POST'
+
+                self.raise_error = False
+                self.COOKIES[settings.CSRF_COOKIE_NAME] = token
+                self.POST['csrfmiddlewaretoken'] = token
+                self.raise_error = raise_error
+
+            def _load_post_and_files(self):
+                raise IOError('error reading input data')
+
+            def _get_post(self):
+                if self.raise_error:
+                    self._load_post_and_files()
+                return self._post
+
+            def _set_post(self, post):
+                self._post = post
+
+            POST = property(_get_post, _set_post)
+
+        token = 'ABC'
+
+        req = CsrfPostRequest(token, raise_error=False)
+        resp = CsrfViewMiddleware().process_view(req, post_form_view, (), {})
+        self.assertEqual(resp, None)
+
+        req = CsrfPostRequest(token, raise_error=True)
+        resp = CsrfViewMiddleware().process_view(req, post_form_view, (), {})
+        self.assertEqual(resp.status_code, 403)

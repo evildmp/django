@@ -438,6 +438,13 @@ class Post(models.Model):
         return "Very awesome."
 
 
+# Proxy model to test overridden fields attrs on Post model so as not to
+# interfere with other tests.
+class FieldOverridePost(Post):
+    class Meta:
+        proxy = True
+
+
 @python_2_unicode_compatible
 class Gadget(models.Model):
     name = models.CharField(max_length=100)
@@ -815,3 +822,20 @@ class Worker(models.Model):
     work_at = models.ForeignKey(Restaurant)
     name = models.CharField(max_length=50)
     surname = models.CharField(max_length=50)
+
+
+# Models for #23329
+class ReferencedByParent(models.Model):
+    pass
+
+
+class ParentWithFK(models.Model):
+    fk = models.ForeignKey(ReferencedByParent)
+
+
+class ChildOfReferer(ParentWithFK):
+    pass
+
+
+class M2MReference(models.Model):
+    ref = models.ManyToManyField('self')
