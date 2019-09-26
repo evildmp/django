@@ -1,0 +1,361 @@
+.. _logging-how-to
+
+====================================
+How to use logging in Django
+====================================
+
+You'll almost certainly have seen log messages appear in the console when using
+the Django runserver. This is part of Django's :ref:`default logging
+configuration <default-logging-configuration>`. Logging can be configured to
+your own requirements; the controls are extensive and fine-grained.
+
+
+Make basic logging calls
+========================
+
+Python programmers will often drop ``print()``\s into their code for quick and
+easy debugging. Using the logging framework is only a little more effort than
+that, but it's much more elegant and flexible, and can be used at the same time
+to give you a lot more information about the state and health of your
+application.
+
+To send a log message from within your code, you drop a logging call into it.
+First, you need to import the Python logging library, and then get a logger
+instance with ``logging.getLogger()``. The ``getLogger()`` method must be
+provided with a name. Using ``__name__``, which will provide the name of the
+current Python module is a good option (though see :ref:`naming-loggers` for
+use of explicit naming):
+
+..  code-block:: python
+
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+And then in a function, for example in a view:
+
+..  code-block:: python
+
+    def some_view(request):
+        ...
+        if risky_state:
+            logger.warning('Platform is running at risk')
+
+When this code is executed, that message will be sent to the logger. If you're
+using Django's default logging configuration, it will appear in the console.
+
+The ``WARNING`` level used in the example above is one of several :ref:`logging
+severity levels <topic-logging-parts-loggers>`: ``DEBUG``, ``INFO``,
+``WARNING``, ``ERROR``, ``CRITICAL``. So, another example might be::
+
+    logger.critical('Payment system is not responding')
+
+The default logging configuration, which Django inherits from the Python
+logging module, prints all messages of level ``WARNING`` and higher to the
+console. Django's own defaults will *not* pass ``INFO`` or lower severity
+messages from applications other than Django itself to the console - that will
+need to be configured explicitly.
+
+..  admonition:: Using logging calls in ``settings.py``
+
+    You might be tempted to try placing logging calls in your ``settings.py``
+    while experimenting, to see them executed when the runserver is restarted.
+    However, the way Django logging is configured as part of the ``setup()``
+    function means that these calls (unlike ``print()``\s) may not work as
+    expected within your ``settings.py``, because *logging will not be set up
+    at that point*. For a quick and easy way to explore logging, use a view
+    function as suggested above.
+
+Customise logging configuration
+================================
+
+In order to control how your logs are sent to various destinations - to log
+files, external services, email and so on - logging needs some additional
+configuration. By default, configuration is managed with the :setting:`LOGGING`
+setting, which in turn extends the default logging configuration. The setting
+uses the :ref:`dictConfig format <logging-config-dictschema>`. There are other
+ways of configuring logging, as described in the :mod:`Python logging
+documentation <python:logging.config>`. For the sake of simplicity, this
+documentation will only consider configuration via the ``LOGGING`` setting.
+
+In the most basic configuration, a :ref:`logger <topic-logging-parts-loggers>`
+receives messages from Django, and passes them to a :ref:`handler
+<topic-logging-parts-handlers>`, which sends them to some sort of output.
+
+The logger is configured to forward messages to a particular handler, depending
+on each message's log severity level. The handler will also use the log level
+to decide what to do with the message: silently ignore it, write it to a log
+file, forward it to a paging service and so on.
+
+Basic logging configuration
+---------------------------
+
+Create a ``LOGGING`` dictionary
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In your ``settings.py``:
+
+..  code-block:: python
+
+    LOGGING = {
+        'version': 1,                       # the dictConfig format version
+        'disable_existing_loggers': False,  # retain the default loggers
+    }
+
+We set the ``disable_existing_loggers`` to ``False`` (default is ``True``)
+because we want to retain the loggers defined in the default configuration
+(generally, this is choice that makes most sense).
+
+Define a handler
+~~~~~~~~~~~~~~~~
+
+First, we need to configure a handler. In this example we'll configure a single
+handler named ``file``, that will save logs to the file ``general.log`` at the
+project root.
+
+..  code-block:: python
+
+    LOGGING = {
+        [...]
+        'handlers': {
+            'file': {
+                'class': 'logging.FileHandler',
+                'filename': 'general.log',
+            },
+        },
+    }
+
+This handler will process logs of *all* severity levels. This can be controlled
+
+See :ref:`more-examples` below.
+
+.. _basic-logger-configuration:
+
+Define a logger
+~~~~~~~~~~~~~~~
+
+Next we will define a logger mapping, that determines which messages will be forwarded to which handlers::
+
+    LOGGING = {
+        [...]
+        'loggers': {
+            '': {
+                'level': 'DEBUG',
+                'handlers': ['file'],
+                'propagate': True,
+            },
+        }
+
+This configuration (``''``) is *unnamed*. That means that it will process
+messages from *all* applications. It will forward messages of all levels
+(``DEBUG`` and higher) to the ``file`` handler. See :ref:`naming-loggers` below
+for defining configurations that will forward messages only from particular
+loggers.
+
+Now you can drop a logging call into some code simply to verify that it is
+being executed, for example::
+
+    logger.debug('Attempting to connect to API')
+
+When that code is executed, you will find the log message (amongst others) in
+the file ``general.log`` in the root of the project.
+
+These are the basic steps to configure custom logging and see it in action.
+However for practical purposes, the actual example above is no more than a
+working starting point that would need to be refined further to be useful. The
+next section covers the steps required to build a more practical logging
+configuration.
+
+Refining logging configuration
+------------------------------
+
+The configuration described above is very indiscriminate:
+
+* it captures logs from the entire project
+* it captures logs of all levels
+* it sends them all to a single file
+
+Useful logging will be more discriminating about what it logs and where the logs are sent.
+
+.. _naming-loggers:
+
+Logging from specific applications and modules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The unnamed logging configuration ``''``, sometimes referred to as a "root
+logger", captures logs from any Python application, whereas a named logging
+configuration will capture logs only from loggers with matching names.
+
+Suppose your project contains an application named ``my_app``. Within any
+module in ``my_app``, you can define your logger with::
+
+    logging.getLogger(__name__)
+
+and create a configuration named ``my_app`` to capture logs from it and only
+it::
+
+    :emphasize-lines: 4
+
+    LOGGING = {
+        [...]
+        'loggers': {
+            'my_app': {
+                ...
+            },
+        }
+
+Using ``__name__`` allows you to organize log messsages according to their
+provenance within your project's applications automatically. It also ensures
+that you will not experience name collisions.
+
+Alternatively, you can name your loggers explictly::
+
+    logger = logging.getLogger('project')
+
+and name a configuration accordingly::
+
+    :emphasize-lines: 4
+
+    LOGGING = {
+        [...]
+        'loggers': {
+            'project': {
+                ...
+            },
+        }
+
+Using logger hierarchies and propagation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Logger naming is *hierarchical*, allowing you to refine configuration further.
+You could create a configuration named ``my_app.views`` to capture logs only
+from its ``views`` module, for example, and if you have some other way of
+organizing your logging messages, you can provide any dot-separated name to
+identify your logger, for example::
+
+    logger = logging.getLogger('project.interesting.stuff')
+
+Just as ``my_app`` is a parent of ``my_app.views``, ``project`` is a parent of
+``project.interesting``, which in turn is a parent of
+``project.interesting.stuff`` and so on.
+
+This hierarchy of loggers is significant because loggers can be set to
+propagate their logging calls to their parents. Suppose you have loggers
+configured thus::
+
+    LOGGING = {
+        ...
+        'loggers': {
+            '': {
+                ...
+            },
+            'my_app': {
+                ...
+                'propagate': True,
+            },
+            'my_app.security': {
+                ...
+                'propagate': False,
+            },
+        },
+    }
+
+The ``my_app`` logger will propagate its logs to the unnamed root logger,
+whereas ``my_app.security`` will not propagate its logs to its parent. By
+default, ``propagate`` is ``True``.
+
+Control logging levels
+----------------------
+
+Of loggers
+~~~~~~~~~~
+
+A logger's ``level`` can be set, so that only messages of a certain severity
+level and higher will be forwarded to its handlers. In the :ref:`configuration
+example above <basic-logger-configuration>`, logs of all levels are accepted,
+but that's not usually very helpful. That's epecially so when a logger is
+producing ``DEBUG`` messages, which it only makes sense to capture when we're
+actually debugging.
+
+Rather than manually change the configuration when we want those messages, a
+better way would be to set that automatically according to the Django ``DEBUG``
+setting, or even by setting an environment variable ``DJANGO_LOG_LEVEL`` and
+using it thus::
+
+    :emphasize-lines: 6
+
+    LOGGING = {
+        [...]
+        'loggers': {
+            '': {
+                ...
+                'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+            },
+        }
+
+
+Of handlers
+~~~~~~~~~~~
+
+Logging levels can also be set on the handlers (by default, they accept log messages of all levels), giving us further control over message routing.
+
+For example, a logger can have multiple handlers, each with a different log level. In this way, it is possible to
+provide different forms of notification depending on the importance of a message - we could have one handler that
+forwards ``ERROR`` and ``CRITICAL`` messages to a paging service, while a second handler logs all messages (including
+``ERROR`` and ``CRITICAL`` messages) to a file for later analysis.
+
+Using the example of the ``file`` handler defined earlier, we'd add a `level` key to its definition:
+
+..  code-block:: python
+
+    LOGGING = {
+        'handlers': {
+            'file': {
+                [...]
+                'level': 'warning',
+            },
+        },
+    }
+
+
+
+
+It's useful for basic debugging and
+verifying that our site is working as expected, but if we want to keep logs for monitoring or later analysis, we will
+need to set that up that appropriately.
+
+
+Note that a logger can forward messages to multiple handlers, so the relation
+between loggers and handlers is many-to-many.
+
+
+Using built-in handlers
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Python includes a number of :mod:`logging handlers <python:logging-handlers>`. The ``FileHandler`` is one of several
+that send logs to files. Handlers also exist to:
+
+Django adds a :class:`~django.utils.log.AdminEmailHandler`, to send logs by email to the site :setting:`ADMINS`. For
+example, to create a handler named ``mail_admins``:
+
+..  code-block:: python
+
+    'handlers': {
+        [...]
+        'mail_admins': {
+            'level': 'ERROR',
+            'class': 'django.utils.log.AdminEmailHandler',
+            'include_html': True,
+        }
+    },
+
+See :ref:`logging-security-implications>` for the implications of sending logs by email.
+
+
+In the example above, the ``FileHandler``
+
+** need to provde examples of email handler, stream handler etc
+
+
+
+

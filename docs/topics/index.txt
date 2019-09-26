@@ -22,7 +22,7 @@ Introductions to all the key parts of Django you'll need to know:
    signing
    email
    i18n/index
-   logging
+   Use logging in Django <logging>
    pagination
    security
    performance
