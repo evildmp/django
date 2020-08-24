@@ -283,6 +283,48 @@ In the ``polls/urls.py`` file include the following code:
         path('', views.index, name='index'),
     ]
 
+The ``path`` function and its arguments
+---------------------------------------
+
+What does ``path('', views.index, name='index')`` mean?
+:func:`~django.urls.path` is a function that, given a URL, works out what view
+should handle it. In the example above, we have passed three arguments to it.
+
+``route`` (``''``)
+~~~~~~~~~~~~~~~~~~
+
+In a URL such as ``https://www.example.com/myapp/?page=3``, the *route* is
+``myapp/`` - the domain name ``https://www.example.com/`` and the GET parameter
+``?page=3`` are not relevant to the route. This route is what the ``path``
+function tries to match.
+
+The ``route`` parameter is a string that contains a URL *pattern*.
+
+When processing a request, Django starts at the first pattern in
+``urlpatterns`` and makes its way down the list, comparing the requested URL
+against each pattern until it finds one that matches.
+
+Here, we're matching the empty route ``''``.
+
+``view`` (``views.index``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When Django finds a matching pattern, it calls the specified view function with
+an :class:`~django.http.HttpRequest` object as the first argument and any
+"captured" values from the route as keyword arguments. We'll give an example
+of this in a bit.
+
+``name`` (``'index'``)
+~~~~~~~~~~~~~~~~~~~~~~
+
+This is an optional name that you can give your URL pattern. Naming your URL
+lets you refer to it unambiguously from elsewhere in Django, especially from
+within templates. This powerful feature allows you to make global changes to
+the URL patterns of your project while only touching a single file.
+
+Edit the root URLconf
+---------------------
+
 The next step is to point the root URLconf at the ``polls.urls`` module. In
 ``mysite/urls.py``, add an import for ``django.urls.include`` and insert an
 :func:`~django.urls.include` in the ``urlpatterns`` list, so you have:
@@ -329,45 +371,6 @@ text "*Hello, world. You're at the polls index.*", which you defined in the
 
     If you get an error page here, check that you're going to
     http://localhost:8000/polls/ and not http://localhost:8000/.
-
-The :func:`~django.urls.path` function is passed four arguments, two required:
-``route`` and ``view``, and two optional: ``kwargs``, and ``name``.
-At this point, it's worth reviewing what these arguments are for.
-
-:func:`~django.urls.path` argument: ``route``
----------------------------------------------
-
-``route`` is a string that contains a URL pattern. When processing a request,
-Django starts at the first pattern in ``urlpatterns`` and makes its way down
-the list, comparing the requested URL against each pattern until it finds one
-that matches.
-
-Patterns don't search GET and POST parameters, or the domain name. For example,
-in a request to ``https://www.example.com/myapp/``, the URLconf will look for
-``myapp/``. In a request to ``https://www.example.com/myapp/?page=3``, the
-URLconf will also look for ``myapp/``.
-
-:func:`~django.urls.path` argument: ``view``
---------------------------------------------
-
-When Django finds a matching pattern, it calls the specified view function with
-an :class:`~django.http.HttpRequest` object as the first argument and any
-"captured" values from the route as keyword arguments. We'll give an example
-of this in a bit.
-
-:func:`~django.urls.path` argument: ``kwargs``
-----------------------------------------------
-
-Arbitrary keyword arguments can be passed in a dictionary to the target view. We
-aren't going to use this feature of Django in the tutorial.
-
-:func:`~django.urls.path` argument: ``name``
---------------------------------------------
-
-Naming your URL lets you refer to it unambiguously from elsewhere in Django,
-especially from within templates. This powerful feature allows you to make
-global changes to the URL patterns of your project while only touching a single
-file.
 
 When you're comfortable with the basic request and response flow, read
 :doc:`part 2 of this tutorial </intro/tutorial02>` to start working with the
